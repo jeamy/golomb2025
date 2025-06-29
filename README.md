@@ -18,7 +18,10 @@ Requires `gcc` and GNU make. The Makefile builds with `-Wall -O3 -march=native -
 ```
 * **marks** – Target order *n* (number of marks).
 * `-v` – Verbose mode (prints intermediate search states).
-* `-mp` – Use the multithreaded OpenMP solver (faster for large orders).
+* `-mp` – Multithreaded solver with static split (fast, good scaling).
+* `-d`  – Dynamic OpenMP **task** solver (finer load-balancing).
+* `-b`  – Improved lower-bound start length (Hasse bound approximation) – fewer length iterations.
+* `-e`  – Experimental SIMD-optimised bitset operations (requires AVX2-capable CPU).
 * The solver writes results to `out/GOL_n<marks>.txt`.  See “Output file format” below.
 * The runtime in seconds is printed after completion.
 
@@ -65,7 +68,9 @@ The solver uses recursive backtracking with pruning:
 2. Reject a partial solution immediately when a duplicate distance appears.
 3. Use a lower‐bound heuristic: if even by spacing the remaining marks 1 apart the current tentative length cannot be met, prune.
 4. Apply symmetry-breaking: the second mark is limited to ≤ L/2, eliminating mirrored solutions.
-5. With `-mp` enabled, the search tree is split across threads by fixing the 2nd and 3rd marks (two-level parallelisation).
+5. Parallelisation
+   • `-mp` – static split: threads fixed on 2nd & 3rd marks.
+   • `-d`  – dynamic tasks: OpenMP tasks from 2nd mark downward for automatic work-stealing.
 
 ● **With LUT entry** – If an optimal length for the requested order exists in the LUT, the solver starts at that length and verifies the result: *Optimal ✅* or *Not optimal ❌*.
 

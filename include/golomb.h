@@ -36,5 +36,7 @@ bool solve_golomb(int n, int target_length, ruler_t *out, bool verbose);
 
 /* Multi-threaded variant (OpenMP). Explores top-level branches in parallel. */
 bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose);
+/* Dynamic OpenMP task-based solver (enable with -d) */
+bool solve_golomb_mt_dyn(int n, int target_length, ruler_t *out, bool verbose);
 
 #endif /* GOLOMB_H */

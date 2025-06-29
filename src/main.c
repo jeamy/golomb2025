@@ -27,9 +27,9 @@ static int cmp_int(const void *a, const void *b) { return (*(const int*)a) - (*(
 
 static void usage(const char *prog)
 {
-    fprintf(stderr, "Usage: %s <marks> [-v] [-mp]\n", prog);
+    fprintf(stderr, "Usage: %s <marks> [-v] [-mp] [-d] [-b] [-e]\n", prog);
     fprintf(stderr, "  <marks>  order (number of marks) to search\n");
-    fprintf(stderr, "  -v       verbose output\n  -mp      use OpenMP multithreaded solver\n");
+    fprintf(stderr, "  -v       verbose output\n  -mp      multithreaded solver (static split)\n  -d       dynamic OpenMP task solver\n  -b       better lower-bound start length\n  -e       SIMD-optimised bitset (experimental)\n");
     exit(EXIT_FAILURE);
 }
 
@@ -45,11 +45,17 @@ int main(int argc, char **argv)
     clock_gettime(CLOCK_MONOTONIC, &ts_start);
     bool verbose = false;
     bool use_mp = false;
+    bool use_dyn = false;
+    bool use_bound = false;
+    bool use_simd = false;
 
     /* parse optional flags */
     for (int i = 2; i < argc; ++i) {
         if (strcmp(argv[i], "-v") == 0) verbose = true;
         else if (strcmp(argv[i], "-mp") == 0) use_mp = true;
+        else if (strcmp(argv[i], "-d") == 0) { use_dyn = true; use_mp = false; }
+        else if (strcmp(argv[i], "-b") == 0) use_bound = true;
+        else if (strcmp(argv[i], "-e") == 0) use_simd = true; /* placeholder */
         else usage(argv[0]);
     }
 
@@ -60,7 +66,15 @@ int main(int argc, char **argv)
     bool compared = false;
     bool optimal = false;
 
-    int target_len_start = ref ? ref->length : (n * (n - 1) / 2); /* simple lower bound */
+    int target_len_start;
+    if (ref) {
+        target_len_start = ref->length;
+    } else {
+        int base = n * (n - 1) / 2;
+        if (use_bound && n > 3)
+            base += (n - 3) / 2; /* simple Hasse-style improvement */
+        target_len_start = base;
+    }
 
     if (ref && verbose) {
         printf("Reference optimal ruler from LUT:\n");
@@ -68,8 +82,10 @@ int main(int argc, char **argv)
     }
 
     for (int L = target_len_start; L <= MAX_LEN_BITSET; ++L) {
-        bool ok = use_mp ? solve_golomb_mt(n, L, &result, verbose)
-                         : solve_golomb   (n, L, &result, verbose);
+        bool ok;
+        if (use_dyn) ok = solve_golomb_mt_dyn(n, L, &result, verbose);
+        else if (use_mp) ok = solve_golomb_mt(n, L, &result, verbose);
+        else ok = solve_golomb(n, L, &result, verbose);
         if (ok) { solved = true; break; }
     }
 
@@ -117,7 +133,10 @@ int main(int argc, char **argv)
     /* build option string */
     char opts[16] = "";
     if (verbose) strcat(opts, "-v ");
-    if (use_mp) strcat(opts, "-mp ");
+    if (use_dyn) strcat(opts, "-d ");
+    else if (use_mp) strcat(opts, "-mp ");
+    if (use_bound) strcat(opts, "-b ");
+    if (use_simd) strcat(opts, "-e ");
     size_t optlen = strlen(opts);
     if (optlen && opts[optlen-1] == ' ') opts[--optlen] = '\0';
 
