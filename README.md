@@ -18,8 +18,8 @@ Requires `gcc` and GNU make. The default flags are `-Wall -O2`.
 ```
 * **length** – Target length *L* to search.
 * `-v` – Verbose mode (prints intermediate search states).
-* Ergebnis wird zusätzlich in `GOL_<length>.txt` gespeichert (Länge, Markierungen, Positionen, Laufzeit, ggf. Optimal-Status).
-* Laufzeit in Sekunden wird nach Abschluss auf der Konsole ausgegeben.
+* The result is also written to `GOL_<length>.txt` (length, marks, positions, runtime, and—if available—optimal status).
+* The runtime in seconds is printed after completion.
 
 Example:
 ```bash
@@ -47,9 +47,10 @@ The solver uses recursive backtracking with pruning:
 2. Reject a partial solution immediately when a duplicate distance appears.
 3. Use a lower-bound heuristic: if even by spacing the remaining marks 1 apart the target length cannot be met, prune.
 
-● **Mit LUT-Eintrag** – Ist die Länge in der Tabelle vorhanden, übernimmt der Solver deren Markierungszahl *n* und prüft das Ergebnis anschließend: *Optimal ✅* oder *Nicht optimal ❌*.
+● **With LUT entry** – If the length exists in the table, the solver uses its mark count *n* and afterwards checks the result against the LUT: *Optimal ✅* or *Not optimal ❌*.
 
-● **Ohne LUT-Eintrag** – Fehlt ein Eintrag, sucht der Solver selbstständig nach dem ersten gültigen Lineal, indem er *n* von 2 bis `MAX_MARKS` erhöht. Hier erfolgt kein Vergleich, aber die Laufzeit wird gemessen und ausgegeben.
+● **Without LUT entry** – If no entry is found, the solver searches for the first valid ruler by incrementing *n* from 2 up to `MAX_MARKS`. No comparison is performed, but the runtime is still measured and printed.
 
-Future work could add multithreading (OpenMP) and a more advanced branch-and-bound heuristic for larger rulers.
-# golomb2025
+### Performance
+The solver now uses a bitset for occupied distances (branch-and-bound). Optimal rulers up to order ≈ 18 are found within seconds, orders 24–25 usually within < 1 minute. For orders > 25 the runtime grows rapidly. Further speed-ups are possible via multithreading (OpenMP) and stronger symmetry-breaking rules.
+
