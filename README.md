@@ -93,7 +93,7 @@ The solver uses recursive backtracking with pruning:
 
 ● **Without LUT entry** – If the order is beyond the LUT, the solver incrementally tests longer lengths until a valid ruler is found. No comparison is possible, but runtime is still measured and printed.
 
-### Sample runtime (Intel i7-11800H, GCC 13.3, 8 threads)
+### Sample runtime (order n = 14)
 | Flags | Time |
 |-------|------|
 | `-mp` | **152.9 s** |
