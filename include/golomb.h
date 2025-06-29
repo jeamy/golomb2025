@@ -9,6 +9,13 @@
 #define MAX_LEN_BITSET 600   /* upper search bound for length */
 #endif
 
+/* derived: number of 64-bit words needed, plus guard to avoid out-of-bounds gathers */
+#define BS_WORDS   ((MAX_LEN_BITSET >> 6) + 2)
+#ifndef __has_attribute
+#define __has_attribute(x) 0
+#endif
+
+
 /* Representation of a Golomb ruler */
 typedef struct {
     int length;                 /* last mark position (ruler length) */

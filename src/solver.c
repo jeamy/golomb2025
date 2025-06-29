@@ -23,7 +23,7 @@ static inline int test_any_dup_avx2(const uint64_t *bs, const int *dist4)
     /* Gather corresponding 64-bit words from the bitset */
     __m256i words64 = _mm256_i32gather_epi64((const long long*)bs, words32, 8);
 
-    /* Build bit masks (scalar, cheaper than variable shifts) */
+    /* words32 is always < BS_WORDS thanks to guard; build masks */
     uint64_t masks_arr[4];
     for (int i = 0; i < 4; ++i) masks_arr[i] = 1ULL << (dist4[i] & 63);
     __m256i masks = _mm256_loadu_si256((const __m256i*)masks_arr);
@@ -133,7 +133,7 @@ bool solve_golomb(int n, int target_length, ruler_t *out, bool verbose)
     if (n > MAX_MARKS || target_length > MAX_LEN_BITSET)
         return false;
     int pos[MAX_MARKS] = {0};
-    uint64_t dist_bs[(MAX_LEN_BITSET >> 6) + 1] = {0};
+    uint64_t dist_bs[BS_WORDS] = {0};
 
     if (!dfs(1, n, target_length, pos, dist_bs, verbose))
         return false;
@@ -170,7 +170,7 @@ bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose)
 /* Parallelise on second and third mark (two-level) */
 #pragma omp parallel
     {
-        uint64_t dist_bs[(MAX_LEN_BITSET >> 6) + 1];
+        uint64_t dist_bs[BS_WORDS];
         int pos[MAX_MARKS];
 
 #pragma omp for schedule(dynamic, 1) nowait
@@ -181,7 +181,7 @@ bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose)
                 if (found)
                     continue;
                 /* init */
-                memset(dist_bs, 0, sizeof(dist_bs));
+                memset(dist_bs, 0, BS_WORDS * sizeof(uint64_t));
                 pos[0] = 0;
                 pos[1] = second;
                 pos[2] = third;
@@ -255,7 +255,7 @@ bool solve_golomb_mt_dyn(int n, int target_length,
                             /* skip task */
                         } else {
                             int pos[MAX_MARKS];
-                            uint64_t bs[(MAX_LEN_BITSET >> 6) + 1] = {0};
+                            uint64_t bs[BS_WORDS] = {0};
                             pos[0] = 0;
                             pos[1] = second;
                             pos[2] = third;
