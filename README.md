@@ -61,3 +61,18 @@ The solver combines bitset-based branch-and-bound, symmetry-breaking, and option
 • Order 28 typically completes within a minute.
 Actual times depend on hardware, but the scaling with `-mp` is near-linear for high orders.
 
+## 6  Development Notes
+This project was developed using **Windsurf**, an advanced AI-powered development environment.  
+The entire codebase was programmed through pair-programming with **OpenAI o3**, making it a showcase of modern AI-assisted development.
+
+Visit Windsurf: <https://codeium.com/windsurf>
+
+Connect with Codeium:  
+• Twitter – <https://twitter.com/codeiumdev>  
+• Discord – <https://discord.gg/3XFf78nAx5>  
+• LinkedIn – <https://www.linkedin.com/company/codeium>  
+• GitHub – <https://github.com/Exafunction/codeium>
+
+## 7  License
+This repository is released under the MIT License. See the `LICENSE` file for the full text.
+
