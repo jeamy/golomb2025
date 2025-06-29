@@ -84,12 +84,6 @@ The entire codebase was programmed through pair-programming with **OpenAI o3**, 
 
 Visit Windsurf: <https://codeium.com/windsurf>
 
-Connect with Codeium:  
-• Twitter – <https://twitter.com/codeiumdev>  
-• Discord – <https://discord.gg/3XFf78nAx5>  
-• LinkedIn – <https://www.linkedin.com/company/codeium>  
-• GitHub – <https://github.com/Exafunction/codeium>
-
 ## 7  License
 This repository is released under the MIT License. See the `LICENSE` file for the full text.
 
