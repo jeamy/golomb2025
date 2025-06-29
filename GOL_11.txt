@@ -1,0 +1,5 @@
+length=11
+marks=5
+positions=0 1 3 4 11
+seconds=0.000083
+optimal=yes
