@@ -45,6 +45,15 @@ const ruler_t *lut_lookup_by_length(int length)
     return NULL;
 }
 
+const ruler_t *lut_lookup_by_marks(int marks)
+{
+    for (size_t i = 0; i < LUT_SZ; ++i) {
+        if (optimal_rulers[i].marks == marks)
+            return &optimal_rulers[i];
+    }
+    return NULL;
+}
+
 void print_ruler(const ruler_t *r)
 {
     if (!r) { puts("(null ruler)"); return; }

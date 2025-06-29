@@ -5,6 +5,9 @@
 #include <stdbool.h>
 
 #define MAX_MARKS 32   /* maximal unterstützte Markierungen */
+#ifndef MAX_LEN_BITSET
+#define MAX_LEN_BITSET 600   /* upper search bound for length */
+#endif
 
 /* Representation of a Golomb ruler */
 typedef struct {
@@ -17,6 +20,8 @@ typedef struct {
 
 /* Returns pointer to optimal ruler by length or NULL if unknown */
 const ruler_t *lut_lookup_by_length(int length);
+/* Returns pointer to optimal ruler by mark count (order) or NULL if unknown */
+const ruler_t *lut_lookup_by_marks(int marks);
 
 /* Prints a ruler to stdout */
 void print_ruler(const ruler_t *r);
@@ -28,5 +33,8 @@ void print_ruler(const ruler_t *r);
  * On success, writes result into out and returns true; else returns false.
  */
 bool solve_golomb(int n, int target_length, ruler_t *out, bool verbose);
+
+/* Multi-threaded variant (OpenMP). Explores top-level branches in parallel. */
+bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose);
 
 #endif /* GOLOMB_H */

@@ -1,0 +1,5 @@
+length=106
+marks=13
+positions=0 7 8 17 21 36 47 63 69 81 101 104 106
+seconds=72.577940
+optimal=yes
