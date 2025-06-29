@@ -27,6 +27,18 @@ The default flags are `-Wall -O3 -march=native -flto -fopenmp`.  No additional l
 * `-d`  – Dynamic OpenMP **task** solver (finer load-balancing).  Set `OMP_CANCELLATION=TRUE` to enable early stopping once a ruler is found (requires OpenMP 5).
 * `-b`  – Improved lower-bound start length (Hasse bound approximation) – fewer length iterations.
 * `-e`  – AVX2-optimised bitset operations.  Gives a ~23 % speed-up on order 14 and larger.
+### Recommended fastest run
+For most systems the following yields the lowest runtime:
+```bash
+env OMP_NUM_THREADS=$(nproc) \
+    OMP_PLACES=cores OMP_PROC_BIND=close \
+    ./bin/golomb <n> -b -mp -e
+```
+• `-b` skips unnecessary length iterations.  
+• `-mp` uses a low-overhead static split with good scaling.  
+• `-e` enables AVX2 SIMD (~20-25 % speed-up for n ≥ 14).  
+Remove `-e` for pre-AVX2 CPUs or very small orders (< 10).
+
 * The solver writes results to `out/GOL_n<marks>.txt`.  See “Output file format” below.
 * The runtime in seconds is printed after completion.
 
