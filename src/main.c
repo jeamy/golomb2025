@@ -48,14 +48,32 @@ int main(int argc, char **argv)
     bool use_dyn = false;
     bool use_bound = false;
     bool use_simd = false; /* -e flag */
+    /* collect flag suffix in the order they appear */
+    char fsuffix[64] = "";
 
     /* parse optional flags */
     for (int i = 2; i < argc; ++i) {
-        if (strcmp(argv[i], "-v") == 0) verbose = true;
-        else if (strcmp(argv[i], "-mp") == 0) use_mp = true;
-        else if (strcmp(argv[i], "-d") == 0) { use_dyn = true; use_mp = false; }
-        else if (strcmp(argv[i], "-b") == 0) use_bound = true;
-        else if (strcmp(argv[i], "-e") == 0) use_simd = true; /* placeholder */
+        if (strcmp(argv[i], "-v") == 0) {
+            verbose = true;
+            strcat(fsuffix, "_v");
+        }
+        else if (strcmp(argv[i], "-mp") == 0) {
+            use_mp = true;
+            strcat(fsuffix, "_mp");
+        }
+        else if (strcmp(argv[i], "-d") == 0) {
+            use_dyn = true;
+            use_mp = false;
+            strcat(fsuffix, "_d");
+        }
+        else if (strcmp(argv[i], "-b") == 0) {
+            use_bound = true;
+            strcat(fsuffix, "_b");
+        }
+        else if (strcmp(argv[i], "-e") == 0) {
+            use_simd = true;
+            strcat(fsuffix, "_e");
+        }
         else usage(argv[0]);
     }
 
@@ -147,8 +165,8 @@ int main(int argc, char **argv)
     if (mkdir("out", 0755) == -1 && errno != EEXIST) {
         perror("mkdir out");
     }
-    char fname[64];
-    snprintf(fname, sizeof fname, "out/GOL_n%d.txt", n);
+    char fname[128];
+    snprintf(fname, sizeof fname, "out/GOL_n%d%s.txt", n, fsuffix);
     FILE *fp = fopen(fname, "w");
     if (fp) {
         fprintf(fp, "length=%d\nmarks=%d\npositions=", result.length, result.marks);
