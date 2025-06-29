@@ -47,7 +47,7 @@ int main(int argc, char **argv)
     bool use_mp = false;
     bool use_dyn = false;
     bool use_bound = false;
-    bool use_simd = false;
+    bool use_simd = false; /* -e flag */
 
     /* parse optional flags */
     for (int i = 2; i < argc; ++i) {
@@ -62,6 +62,9 @@ int main(int argc, char **argv)
     const ruler_t *ref = lut_lookup_by_marks(n);
 
     ruler_t result;
+    extern bool g_use_simd;
+    g_use_simd = use_simd;
+
     bool solved = false;
     bool compared = false;
     bool optimal = false;

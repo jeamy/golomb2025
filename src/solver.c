@@ -1,11 +1,42 @@
 #include "golomb.h"
 #include <string.h>
+#include <immintrin.h> /* AVX2 intrinsics */
 #include <stdint.h>
 
 /* Bitset helpers ---------------------------------------------------------*/
+/* Global runtime flag set by main.c */
+bool g_use_simd = false;
+
 static inline void set_bit(uint64_t *bs, int idx) { bs[idx >> 6] |= 1ULL << (idx & 63); }
 static inline void clr_bit(uint64_t *bs, int idx) { bs[idx >> 6] &= ~(1ULL << (idx & 63)); }
-static inline int test_bit(const uint64_t *bs, int idx) { return (bs[idx >> 6] >> (idx & 63)) & 1ULL; }
+/* Scalar fallback */
+static inline int  test_bit_scalar(const uint64_t *bs, int idx) { return (bs[idx >> 6] >> (idx & 63)) & 1ULL; }
+
+/* Simple AVX2 prototype: checks up to 4 distances at once; returns non-zero if ANY duplicate seen */
+static inline int test_any_dup_avx2(const uint64_t *bs, const int *dist4)
+{
+#if defined(__AVX2__)
+    __m128i idx  = _mm_loadu_si128((const __m128i*)dist4);          /* 4 x int32 */
+    __m128i words= _mm_srli_epi32(idx, 6);                          /* distance>>6 */
+    uint32_t word_arr[4];
+    _mm_storeu_si128((__m128i*)word_arr, words);
+
+    for (int i = 0; i < 4; ++i) {
+        uint32_t w = word_arr[i];
+        if (w >= ((MAX_LEN_BITSET >> 6) + 1)) return 1; /* out-of-bounds safety */
+        int sh = dist4[i] & 63;
+        if ((bs[w] >> sh) & 1ULL) return 1; /* duplicate found */
+    }
+    return 0;
+#else
+    (void)bs; (void)dist4; return 0;
+#endif
+}
+
+static inline int test_bit(const uint64_t *bs, int idx)
+{
+    return test_bit_scalar(bs, idx);
+}
 
 /* Recursive branch&bound with distance bitset */
 static bool dfs(int depth, int n, int target_len, int *pos, uint64_t *dist_bs, bool verbose)
@@ -35,13 +66,28 @@ static bool dfs(int depth, int n, int target_len, int *pos, uint64_t *dist_bs, b
     {
         /* check unique distances */
         bool ok = true;
-        for (int i = 0; i < depth; ++i)
-        {
-            int d = next - pos[i];
-            if (test_bit(dist_bs, d))
-            {
-                ok = false;
-                break;
+        if (g_use_simd && depth >= 16) { /* SIMD pays off only with many distances */
+            int dist4[4];
+            int idx4 = 0;
+            for (int i = 0; i < depth; ++i) {
+                dist4[idx4++] = next - pos[i];
+                if (idx4 == 4) {
+                    if (test_any_dup_avx2(dist_bs, dist4)) { ok = false; break; }
+                    idx4 = 0;
+                }
+            }
+            if (ok && idx4 > 0) {
+                for (int j = 0; j < idx4; ++j) {
+                    if (test_bit_scalar(dist_bs, dist4[j])) { ok = false; break; }
+                }
+            }
+        } else {
+            for (int i = 0; i < depth; ++i) {
+                int d = next - pos[i];
+                if (test_bit_scalar(dist_bs, d)) {
+                    ok = false;
+                    break;
+                }
             }
         }
         if (!ok)
