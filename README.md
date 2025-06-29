@@ -81,15 +81,6 @@ The solver uses recursive backtracking with pruning:
 
 ● **Without LUT entry** – If the order is beyond the LUT, the solver incrementally tests longer lengths until a valid ruler is found. No comparison is possible, but runtime is still measured and printed.
 
-### Performance Examples (AMD Ryzen 7 5800X, GCC 13.3)
-| Order | Flags | Runtime |
-|-------|-------|---------|
-| 13 | `-mp` | **3.9 s** |
-| 13 | `-mp -e` | 4.1 s |
-| 14 | `-mp` | 141 s |
-| 14 | `-mp -e` | **109 s** (-23 %) |
-| 14 | `-d -e` + `OMP_CANCELLATION=TRUE` | 130 s |
-
 Take-aways
 * SIMD (`-e`) helps once ≥ 90 distances are tested per node (depth ≥ 16).
 * Static split (`-mp`) has the lowest overhead and scales ~linear with cores.

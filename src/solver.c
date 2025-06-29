@@ -242,50 +242,40 @@ bool solve_golomb_mt_dyn(int n, int target_length,
         {
             const int half = target_length / 2; /* symmetry break */
 
-/* bundle every task in a task-group so we can cancel it */
 #pragma omp taskgroup
             {
+                /* flatten (second, third) space; batch 64 combos per task */
+#pragma omp taskloop grainsize(32) firstprivate(n, target_length, verbose) shared(found, local)
                 for (int second = 1; second <= half; ++second)
-                {
-                if (found) break;
-                for (int third = second + 1; third <= target_length - (n - 2); ++third) {
-                    if (found) break;
-                    #pragma omp task firstprivate(second, third) shared(found, local)
+                    for (int third = second + 1; third <= target_length - (n - 2); ++third)
                     {
-                        if (found) {
-                            /* skip task */
-                        } else {
-                            int pos[MAX_MARKS];
-                            uint64_t bs[BS_WORDS] = {0};
-                            pos[0] = 0;
-                            pos[1] = second;
-                            pos[2] = third;
-                            set_bit(bs, second);
-                            int d13 = third;
-                            int d23 = third - second;
-                            if (d13 == second || d23 == second || test_bit(bs, d13) || test_bit(bs, d23)) {
-                                /* duplicate */
-                            } else {
-                                set_bit(bs, d13);
-                                set_bit(bs, d23);
-                                if (dfs(3, n, target_length, pos, bs, false)) {
-                                    #pragma omp critical
-                                    {
-                                        if (!found) {
-                                            local.marks = n;
-                                            local.length = pos[n - 1];
-                                            memcpy(local.pos, pos, n * sizeof(int));
-                                            found = 1;
-                                        }
-                                    }
-                                    /* cancel remaining tasks in the group (OpenMP 5) */
-                                    #pragma omp cancel taskgroup
-                                }
+                        if (found) continue; /* early poll */
+
+                        int pos[MAX_MARKS];
+                        uint64_t bs[BS_WORDS] = {0};
+                        pos[0] = 0;
+                        pos[1] = second;
+                        pos[2] = third;
+                        set_bit(bs, second);
+                        int d13 = third;
+                        int d23 = third - second;
+                        if (d13 == second || d23 == second || test_bit(bs, d13) || test_bit(bs, d23))
+                            continue;
+                        set_bit(bs, d13);
+                        set_bit(bs, d23);
+                        if (dfs(3, n, target_length, pos, bs, false)) {
+                            int old;
+#pragma omp atomic capture
+                            { old = found; found = 1; }
+                            if (old == 0) {
+                                local.marks = n;
+                                local.length = pos[n - 1];
+                                memcpy(local.pos, pos, n * sizeof(int));
+                                /* stop remaining tasks */
+#pragma omp cancel taskgroup
                             }
                         }
-                    } /* task */
-                } /* for third */
-            } /* for second */
+                    }
             } /* taskgroup */
         } /* single */
     } /* parallel */
