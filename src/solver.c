@@ -18,8 +18,11 @@ static bool dfs(int depth, int n, int target_len, int *pos, uint64_t *dist_bs, b
     /* minimal possible final length if we place marks 1 apart */
     if (last + (n - depth) > target_len) return false;
 
+    int max_next = target_len - (n - depth - 1);
+    if (depth == 1 && max_next > target_len/2) max_next = target_len/2; /* symmetry break */
+
     /* try next positions */
-    for (int next = last + 1; next <= target_len - (n - depth - 1); ++next) {
+    for (int next = last + 1; next <= max_next; ++next) {
         /* check unique distances */
         bool ok = true;
         for (int i = 0; i < depth; ++i) {
@@ -74,29 +77,39 @@ bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose)
     volatile int found = 0; /* shared flag */
     ruler_t res_local;
 
-    /* Parallelise on the second mark position */
+    int half = target_length / 2; /* symmetry break */
+
+    /* Parallelise on second and third mark (two-level) */
     #pragma omp parallel
     {
         uint64_t dist_bs[(MAX_LEN_BITSET >> 6) + 1];
         int pos[MAX_MARKS];
 
         #pragma omp for schedule(dynamic,1) nowait
-        for (int second = 1; second <= target_length - (n - 1); ++second) {
-            if (found) continue;
-            memset(dist_bs, 0, sizeof(dist_bs));
-            memset(pos, 0, sizeof(pos));
-            pos[0] = 0;
-            pos[1] = second;
-            set_bit(dist_bs, second); /* distance from 0 */
+        for (int second = 1; second <= half; ++second) {
+            for (int third = second + 1; third <= target_length - (n - 2); ++third) {
+                if (found) continue;
+                /* init */
+                memset(dist_bs, 0, sizeof(dist_bs));
+                pos[0] = 0;
+                pos[1] = second;
+                pos[2] = third;
+                set_bit(dist_bs, second);
+                int d13 = third;         /* third - 0 */
+                int d23 = third - second;
+                if (d13 == second || d23 == second || test_bit(dist_bs, d13) || test_bit(dist_bs, d23)) continue;
+                set_bit(dist_bs, d13);
+                set_bit(dist_bs, d23);
 
-            if (dfs(2, n, target_length, pos, dist_bs, verbose && omp_get_thread_num()==0)) {
-                #pragma omp critical
-                {
-                    if (!found) {
-                        res_local.marks = n;
-                        res_local.length = pos[n-1];
-                        memcpy(res_local.pos, pos, n * sizeof(int));
-                        found = 1;
+                if (dfs(3, n, target_length, pos, dist_bs, verbose && omp_get_thread_num()==0)) {
+                    #pragma omp critical
+                    {
+                        if (!found) {
+                            res_local.marks = n;
+                            res_local.length = pos[n-1];
+                            memcpy(res_local.pos, pos, n * sizeof(int));
+                            found = 1;
+                        }
                     }
                 }
             }

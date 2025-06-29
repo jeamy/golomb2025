@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-Wall -O2 -std=c99 -fopenmp
+CFLAGS=-Wall -O3 -std=c99 -fopenmp -march=native -flto
 PREFIX=bin
 SRCDIR=src
 INCDIR=include
