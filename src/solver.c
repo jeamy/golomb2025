@@ -12,24 +12,37 @@ static inline void clr_bit(uint64_t *bs, int idx) { bs[idx >> 6] &= ~(1ULL << (i
 /* Scalar fallback */
 static inline int  test_bit_scalar(const uint64_t *bs, int idx) { return (bs[idx >> 6] >> (idx & 63)) & 1ULL; }
 
-/* Simple AVX2 prototype: checks up to 4 distances at once; returns non-zero if ANY duplicate seen */
+/* AVX2: check 4 distances in parallel via gather + bitmask test. Returns 1 if ANY duplicate seen */
 static inline int test_any_dup_avx2(const uint64_t *bs, const int *dist4)
 {
 #if defined(__AVX2__)
-    __m128i idx  = _mm_loadu_si128((const __m128i*)dist4);          /* 4 x int32 */
-    __m128i words= _mm_srli_epi32(idx, 6);                          /* distance>>6 */
-    uint32_t word_arr[4];
-    _mm_storeu_si128((__m128i*)word_arr, words);
+    /* Load distances */
+    __m128i idx32   = _mm_loadu_si128((const __m128i*)dist4);        /* 4 x int32 */
+    __m128i words32 = _mm_srli_epi32(idx32, 6);                      /* distance>>6 (word index) */
 
-    for (int i = 0; i < 4; ++i) {
-        uint32_t w = word_arr[i];
-        if (w >= ((MAX_LEN_BITSET >> 6) + 1)) return 1; /* out-of-bounds safety */
-        int sh = dist4[i] & 63;
-        if ((bs[w] >> sh) & 1ULL) return 1; /* duplicate found */
-    }
-    return 0;
+    /* Gather corresponding 64-bit words from the bitset */
+    __m256i words64 = _mm256_i32gather_epi64((const long long*)bs, words32, 8);
+
+    /* Build bit masks (scalar, cheaper than variable shifts) */
+    uint64_t masks_arr[4];
+    for (int i = 0; i < 4; ++i) masks_arr[i] = 1ULL << (dist4[i] & 63);
+    __m256i masks = _mm256_loadu_si256((const __m256i*)masks_arr);
+
+    /* AND to extract the tested bits, then OR-reduce by testz */
+    __m256i dup = _mm256_and_si256(words64, masks);
+    return !_mm256_testz_si256(dup, dup);
 #else
     (void)bs; (void)dist4; return 0;
+#endif
+}
+
+/* Wrapper for 8 distances using two 4-distance calls */
+static inline int test_any_dup8_avx2(const uint64_t *bs, const int *dist8)
+{
+#if defined(__AVX2__)
+    return test_any_dup_avx2(bs, dist8) || test_any_dup_avx2(bs, dist8 + 4);
+#else
+    (void)bs; (void)dist8; return 0;
 #endif
 }
 
@@ -67,18 +80,18 @@ static bool dfs(int depth, int n, int target_len, int *pos, uint64_t *dist_bs, b
         /* check unique distances */
         bool ok = true;
         if (g_use_simd && depth >= 16) { /* SIMD pays off only with many distances */
-            int dist4[4];
-            int idx4 = 0;
+                        int dist8[8];
+            int idx8 = 0;
             for (int i = 0; i < depth; ++i) {
-                dist4[idx4++] = next - pos[i];
-                if (idx4 == 4) {
-                    if (test_any_dup_avx2(dist_bs, dist4)) { ok = false; break; }
-                    idx4 = 0;
+                dist8[idx8++] = next - pos[i];
+                if (idx8 == 8) {
+                    if (test_any_dup8_avx2(dist_bs, dist8)) { ok = false; break; }
+                    idx8 = 0;
                 }
             }
-            if (ok && idx4 > 0) {
-                for (int j = 0; j < idx4; ++j) {
-                    if (test_bit_scalar(dist_bs, dist4[j])) { ok = false; break; }
+            if (ok && idx8 > 0) {
+                for (int j = 0; j < idx8; ++j) {
+                    if (test_bit_scalar(dist_bs, dist8[j])) { ok = false; break; }
                 }
             }
         } else {
