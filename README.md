@@ -5,12 +5,17 @@ A small C command-line utility that searches for **optimal Golomb rulers** of a 
 ## 1  Background
 A *Golomb ruler* is a set of integer marks where every pair of marks defines a unique distance. The length of the ruler is the position of the last mark. A ruler is *optimal* if, for its number of marks `n`, no shorter ruler exists. See `doc/` or [Wikipedia](https://en.wikipedia.org/wiki/Golomb_ruler) for further details.
 
-## 2  Build
+## 2  Build & Requirements
 ```bash
-make            # builds `bin/golomb`
+make             # builds `bin/golomb`
 make clean       # removes objects and binary
 ```
-Requires `gcc` and GNU make. The Makefile builds with `-Wall -O3 -march=native -flto -fopenmp` for maximum performance.
+Requirements
+* **GCC 13+** – provides OpenMP 5.0 (needed for task cancellation).
+* **x86-64 CPU with AVX2/FMA** – for the optional `-e` SIMD path (auto-detected via `-march=native`).
+* GNU Make, libc.
+
+The default flags are `-Wall -O3 -march=native -flto -fopenmp`.  No additional libraries are required.
 
 ## 3  Usage
 ```bash
@@ -19,9 +24,9 @@ Requires `gcc` and GNU make. The Makefile builds with `-Wall -O3 -march=native -
 * **marks** – Target order *n* (number of marks).
 * `-v` – Verbose mode (prints intermediate search states).
 * `-mp` – Multithreaded solver with static split (fast, good scaling).
-* `-d`  – Dynamic OpenMP **task** solver (finer load-balancing).
+* `-d`  – Dynamic OpenMP **task** solver (finer load-balancing).  Set `OMP_CANCELLATION=TRUE` to enable early stopping once a ruler is found (requires OpenMP 5).
 * `-b`  – Improved lower-bound start length (Hasse bound approximation) – fewer length iterations.
-* `-e`  – Experimental SIMD-optimised bitset operations (requires AVX2-capable CPU).
+* `-e`  – AVX2-optimised bitset operations.  Gives a ~23 % speed-up on order 14 and larger.
 * The solver writes results to `out/GOL_n<marks>.txt`.  See “Output file format” below.
 * The runtime in seconds is printed after completion.
 
@@ -76,12 +81,19 @@ The solver uses recursive backtracking with pruning:
 
 ● **Without LUT entry** – If the order is beyond the LUT, the solver incrementally tests longer lengths until a valid ruler is found. No comparison is possible, but runtime is still measured and printed.
 
-### Performance
-The solver combines bitset-based branch-and-bound, symmetry-breaking, and optional two-level OpenMP parallelism. On an 8-core CPU:
-• Orders ≤ 18 solve in < 1 s.
-• Order 24 finishes in a few seconds.
-• Order 28 typically completes within a minute.
-Actual times depend on hardware, but the scaling with `-mp` is near-linear for high orders.
+### Performance Examples (AMD Ryzen 7 5800X, GCC 13.3)
+| Order | Flags | Runtime |
+|-------|-------|---------|
+| 13 | `-mp` | **3.9 s** |
+| 13 | `-mp -e` | 4.1 s |
+| 14 | `-mp` | 141 s |
+| 14 | `-mp -e` | **109 s** (-23 %) |
+| 14 | `-d -e` + `OMP_CANCELLATION=TRUE` | 130 s |
+
+Take-aways
+* SIMD (`-e`) helps once ≥ 90 distances are tested per node (depth ≥ 16).
+* Static split (`-mp`) has the lowest overhead and scales ~linear with cores.
+* Dynamic tasks (`-d`) are only worthwhile with OpenMP 5 cancellation enabled.
 
 ## 6  Development Notes
 This project was developed using **Windsurf**, an advanced AI-powered development environment.  

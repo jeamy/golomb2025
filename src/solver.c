@@ -248,7 +248,8 @@ bool solve_golomb_mt_dyn(int n, int target_length,
                 for (int second = 1; second <= half; ++second)
                 {
                 if (found) break;
-                for (int third = second + 1; third <= target_length - (n - 2) && !found; ++third) {
+                for (int third = second + 1; third <= target_length - (n - 2); ++third) {
+                    if (found) break;
                     #pragma omp task firstprivate(second, third) shared(found, local)
                     {
                         if (found) {
@@ -277,6 +278,8 @@ bool solve_golomb_mt_dyn(int n, int target_length,
                                             found = 1;
                                         }
                                     }
+                                    /* cancel remaining tasks in the group (OpenMP 5) */
+                                    #pragma omp cancel taskgroup
                                 }
                             }
                         }
