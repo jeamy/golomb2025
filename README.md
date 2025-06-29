@@ -93,6 +93,17 @@ The solver uses recursive backtracking with pruning:
 
 ● **Without LUT entry** – If the order is beyond the LUT, the solver incrementally tests longer lengths until a valid ruler is found. No comparison is possible, but runtime is still measured and printed.
 
+### Sample runtime (Intel i7-11800H, GCC 13.3, 8 threads)
+| Flags | Time |
+|-------|------|
+| `-mp` | **152.9 s** |
+| `-mp -b` | 158.9 s |
+| `-mp -b -e` | 154.0 s |
+| `-d -e` | 2270 s |
+| `-mp -d -e` | 2285 s |
+
+All runs used `env OMP_CANCELLATION=TRUE`. The dynamic task solver (`-d`) remains roughly **15×** slower (even the mixed `-mp -d` mode) even with SIMD and cancellation. AVX2 (`-e`) shows its benefit chiefly for the static solver and for larger orders.
+
 Take-aways
 * SIMD (`-e`) helps once ≥ 90 distances are tested per node (depth ≥ 16).
 * Static split (`-mp`) has the lowest overhead and scales ~linear with cores.
