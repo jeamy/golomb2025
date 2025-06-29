@@ -19,7 +19,11 @@ static bool dfs(int depth, int n, int target_len, int *pos, uint64_t *dist_bs, b
     if (last + (n - depth) > target_len) return false;
 
     int max_next = target_len - (n - depth - 1);
-    if (depth == 1 && max_next > target_len/2) max_next = target_len/2; /* symmetry break */
+    if (depth == 1) {
+        int limit = target_len / 2; /* symmetry break */
+        if (limit < last + 1) limit = last + 1; /* ensure at least one candidate */
+        if (max_next > limit) max_next = limit;
+    }
 
     /* try next positions */
     for (int next = last + 1; next <= max_next; ++next) {
@@ -74,6 +78,10 @@ bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose)
 {
 #ifdef _OPENMP
     if (n > MAX_MARKS || target_length > MAX_LEN_BITSET) return false;
+    /* Very small orders (<=3) are faster single-threaded */
+    if (n <= 3) {
+        return solve_golomb(n, target_length, out, verbose);
+    }
     volatile int found = 0; /* shared flag */
     ruler_t res_local;
 

@@ -19,8 +19,23 @@ Requires `gcc` and GNU make. The Makefile builds with `-Wall -O3 -march=native -
 * **marks** – Target order *n* (number of marks).
 * `-v` – Verbose mode (prints intermediate search states).
 * `-mp` – Use the multithreaded OpenMP solver (faster for large orders).
-* The result is also written to `GOL_n<marks>.txt` (length, marks, positions, runtime, and—if available—optimal status).
+* The solver writes results to `out/GOL_n<marks>.txt`.  See “Output file format” below.
 * The runtime in seconds is printed after completion.
+
+### Output file format
+```
+length=<last-mark>
+marks=<n>
+positions=<space-separated mark positions>
+distances=<all measurable distances>
+missing=<distances 1..length that are NOT measurable>
+seconds=<raw runtime, floating seconds>
+time=<pretty runtime, h:mm:ss.mmm>
+options=<command-line flags or "none">
+optimal=<yes|no>   # only if reference ruler existed
+```
+
+The same distance and missing lists are echoed to the console after the ruler is printed.
 
 Example:
 ```bash
@@ -31,14 +46,16 @@ Example:
 ```
 
 golomb-2025/
+├── bin/              # compiled executable (`golomb`)
+├── out/              # generated result files
 ├── include/          # public headers
 │   └── golomb.h
-├── src/              # implementation
+├── src/              # C implementation
 │   ├── lut.c         # built-in optimal rulers table & helpers
 │   ├── solver.c      # branch-and-bound solver (bitset, OpenMP)
 │   └── main.c        # CLI / program entry
-├── data/             # human-readable reference list (optional)
 ├── Makefile
+├── LICENSE
 └── README.md
 ```
 

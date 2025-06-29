@@ -1,5 +1,0 @@
-length=151
-marks=15
-positions=0 6 7 15 28 40 51 75 89 92 94 121 131 147 151
-seconds=985.277414
-optimal=yes

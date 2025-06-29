@@ -4,6 +4,27 @@
 #include <string.h>
 #include <time.h>
 
+#include <stdio.h>
+#include <sys/stat.h>
+#include <errno.h>
+
+/* Format seconds into h:mm:ss.mmm or mm:ss.mmm or s.mmm */
+static void format_elapsed(double sec, char *out, size_t len)
+{
+    int hours = (int)(sec / 3600);
+    int minutes = (int)((sec - hours * 3600) / 60);
+    double seconds = sec - hours * 3600 - minutes * 60;
+    if (hours > 0)
+        snprintf(out, len, "%d:%02d:%06.3f", hours, minutes, seconds);
+    else if (minutes > 0)
+        snprintf(out, len, "%02d:%06.3f", minutes, seconds);
+    else
+        snprintf(out, len, "%.3f s", seconds);
+}
+
+/* qsort helper */
+static int cmp_int(const void *a, const void *b) { return (*(const int*)a) - (*(const int*)b); }
+
 static void usage(const char *prog)
 {
     fprintf(stderr, "Usage: %s <marks> [-v] [-mp]\n", prog);
@@ -64,19 +85,59 @@ int main(int argc, char **argv)
 
         clock_gettime(CLOCK_MONOTONIC, &ts_end);
     double elapsed = (ts_end.tv_sec - ts_start.tv_sec) + (ts_end.tv_nsec - ts_start.tv_nsec)/1e9;
+    char tbuf[32];
+    format_elapsed(elapsed, tbuf, sizeof tbuf);
     printf("Found ruler: ");
     print_ruler(&result);
-    printf("Elapsed time: %.6f s\n", elapsed);
+    printf("Elapsed time: %s\n", tbuf);
 
-    char fname[32];
-    snprintf(fname, sizeof fname, "GOL_n%d.txt", n);
+    /* compute all pairwise distances */
+    int dist[(MAX_MARKS*(MAX_MARKS-1))/2];
+    int dcnt = 0;
+    for (int i = 0; i < result.marks; ++i)
+        for (int j = i + 1; j < result.marks; ++j)
+            dist[dcnt++] = result.pos[j] - result.pos[i];
+    qsort(dist, dcnt, sizeof(int), cmp_int);
+
+    /* Determine missing distances */
+    int miss[MAX_LEN_BITSET];
+    int mcnt = 0;
+    char present[MAX_LEN_BITSET+1] = {0};
+    for (int i = 0; i < dcnt; ++i) present[dist[i]] = 1;
+    for (int d = 1; d <= result.length; ++d) {
+        if (!present[d]) miss[mcnt++] = d;
+    }
+
+    printf("Distances (%d): ", dcnt);
+    for (int i = 0; i < dcnt; ++i) printf("%d%s", dist[i], (i==dcnt-1)?"":" ");
+    printf("\nMissing (%d): ", mcnt);
+    for (int i = 0; i < mcnt; ++i) printf("%d%s", miss[i], (i==mcnt-1)?"":" ");
+    printf("\n");
+
+    /* build option string */
+    char opts[16] = "";
+    if (verbose) strcat(opts, "-v ");
+    if (use_mp) strcat(opts, "-mp ");
+    size_t optlen = strlen(opts);
+    if (optlen && opts[optlen-1] == ' ') opts[--optlen] = '\0';
+
+    /* ensure output directory exists */
+    if (mkdir("out", 0755) == -1 && errno != EEXIST) {
+        perror("mkdir out");
+    }
+    char fname[64];
+    snprintf(fname, sizeof fname, "out/GOL_n%d.txt", n);
     FILE *fp = fopen(fname, "w");
     if (fp) {
         fprintf(fp, "length=%d\nmarks=%d\npositions=", result.length, result.marks);
         for (int i = 0; i < result.marks; ++i) {
             fprintf(fp, "%d%s", result.pos[i], (i == result.marks-1) ? "" : " ");
         }
-        fprintf(fp, "\nseconds=%.6f\n", elapsed);
+        fprintf(fp, "\ndistances=");
+        for (int i = 0; i < dcnt; ++i) fprintf(fp, "%d%s", dist[i], (i==dcnt-1)?"":" ");
+        fprintf(fp, "\nmissing=");
+        for (int i = 0; i < mcnt; ++i) fprintf(fp, "%d%s", miss[i], (i==mcnt-1)?"":" ");
+        fprintf(fp, "\nseconds=%.6f\ntime=%s\noptions=%s\n", elapsed, tbuf, optlen ? opts : "none");
         if (compared) fprintf(fp, "optimal=%s\n", optimal ? "yes" : "no");
         fclose(fp);
     } else {
