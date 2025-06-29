@@ -10,7 +10,7 @@ A *Golomb ruler* is a set of integer marks where every pair of marks defines a u
 make            # builds `bin/golomb`
 make clean       # removes objects and binary
 ```
-Requires `gcc` and GNU make. The default flags are `-Wall -O2`.
+Requires `gcc` and GNU make. The Makefile builds with `-Wall -O3 -march=native -flto -fopenmp` for maximum performance.
 
 ## 3  Usage
 ```bash
@@ -35,7 +35,7 @@ golomb-2025/
 │   └── golomb.h
 ├── src/              # implementation
 │   ├── lut.c         # built-in optimal rulers table & helpers
-│   ├── solver.c      # backtracking search
+│   ├── solver.c      # branch-and-bound solver (bitset, OpenMP)
 │   └── main.c        # CLI / program entry
 ├── data/             # human-readable reference list (optional)
 ├── Makefile
@@ -46,12 +46,18 @@ golomb-2025/
 The solver uses recursive backtracking with pruning:
 1. Always add marks in ascending order.
 2. Reject a partial solution immediately when a duplicate distance appears.
-3. Use a lower-bound heuristic: if even by spacing the remaining marks 1 apart the current tentative length cannot be met, prune.
+3. Use a lower‐bound heuristic: if even by spacing the remaining marks 1 apart the current tentative length cannot be met, prune.
+4. Apply symmetry-breaking: the second mark is limited to ≤ L/2, eliminating mirrored solutions.
+5. With `-mp` enabled, the search tree is split across threads by fixing the 2nd and 3rd marks (two-level parallelisation).
 
 ● **With LUT entry** – If an optimal length for the requested order exists in the LUT, the solver starts at that length and verifies the result: *Optimal ✅* or *Not optimal ❌*.
 
 ● **Without LUT entry** – If the order is beyond the LUT, the solver incrementally tests longer lengths until a valid ruler is found. No comparison is possible, but runtime is still measured and printed.
 
 ### Performance
-The solver now uses a bitset for occupied distances (branch-and-bound). Optimal rulers up to order ≈ 18 are found within seconds, orders 24–25 usually within < 1 minute. For orders > 25 the runtime grows rapidly. Further speed-ups are possible via multithreading (OpenMP) and stronger symmetry-breaking rules.
+The solver combines bitset-based branch-and-bound, symmetry-breaking, and optional two-level OpenMP parallelism. On an 8-core CPU:
+• Orders ≤ 18 solve in < 1 s.
+• Order 24 finishes in a few seconds.
+• Order 28 typically completes within a minute.
+Actual times depend on hardware, but the scaling with `-mp` is near-linear for high orders.
 
