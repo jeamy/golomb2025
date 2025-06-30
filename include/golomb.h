@@ -46,6 +46,9 @@ bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose);
 /* Dynamic OpenMP task-based solver (enable with -d) */
 bool solve_golomb_mt_dyn(int n, int target_length, ruler_t *out, bool verbose);
 
+/* Creative solver using Bounded Projective Search */
+bool solve_golomb_creative(int n, ruler_t *out, bool verbose);
+
 
 /* Global runtime flag: 1 => use AVX2 SIMD path where available */
 extern bool g_use_simd;

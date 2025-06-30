@@ -4,7 +4,7 @@ PREFIX=bin
 SRCDIR=src
 INCDIR=include
 
-SRC=$(SRCDIR)/main.c $(SRCDIR)/solver.c $(SRCDIR)/lut.c
+SRC=$(SRCDIR)/main.c $(SRCDIR)/solver.c $(SRCDIR)/lut.c $(SRCDIR)/solver_creative.c
 OBJ=$(SRC:.c=.o)
 TARGET=$(PREFIX)/golomb
 

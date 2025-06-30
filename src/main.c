@@ -47,8 +47,9 @@ int main(int argc, char **argv)
     clock_gettime(CLOCK_MONOTONIC, &ts_start);
     bool verbose = false;
     bool use_mp = false;
-    bool use_dyn = false;
-    bool use_bound = false;
+    bool use_mt_dyn = false;
+    bool use_heuristic_start = false;
+    bool use_creative = false;
     bool use_simd = false; /* -e flag */
     /* collect flag suffix in the order they appear */
     char fsuffix[64] = "";
@@ -68,14 +69,19 @@ int main(int argc, char **argv)
         }
         else if (strcmp(argv[i], "-d") == 0)
         {
-            use_dyn = true;
+            use_mt_dyn = true;
             use_mp = false;
             strcat(fsuffix, "_d");
         }
         else if (strcmp(argv[i], "-b") == 0)
         {
-            use_bound = true;
+            use_heuristic_start = true;
             strcat(fsuffix, "_b");
+        }
+        else if (strcmp(argv[i], "-c") == 0)
+        {
+            use_creative = true;
+            strcat(fsuffix, "_c");
         }
         else if (strcmp(argv[i], "-e") == 0)
         {
@@ -104,7 +110,7 @@ int main(int argc, char **argv)
     else
     {
         int base = n * (n - 1) / 2;
-        if (use_bound && n > 3)
+        if (use_heuristic_start && n > 3)
             base += (n - 3) / 2; /* simple Hasse-style improvement */
         target_len_start = base;
     }
@@ -115,19 +121,21 @@ int main(int argc, char **argv)
         print_ruler(ref);
     }
 
-    for (int L = target_len_start; L <= MAX_LEN_BITSET; ++L)
-    {
-        bool ok;
-        if (use_dyn)
-            ok = solve_golomb_mt_dyn(n, L, &result, verbose);
-        else if (use_mp)
-            ok = solve_golomb_mt(n, L, &result, verbose);
-        else
-            ok = solve_golomb(n, L, &result, verbose);
-        if (ok)
+    if (use_creative) {
+        solved = solve_golomb_creative(n, &result, verbose);
+    } else {
+        for (int L = target_len_start; L <= MAX_LEN_BITSET; ++L)
         {
-            solved = true;
-            break;
+            bool ok = false;
+            if (use_mt_dyn) ok = solve_golomb_mt_dyn(n, L, &result, verbose);
+            else if (use_mp) ok = solve_golomb_mt(n, L, &result, verbose);
+            else ok = solve_golomb(n, L, &result, verbose);
+            
+            if (ok)
+            {
+                solved = true;
+                break;
+            }
         }
     }
 
@@ -183,12 +191,14 @@ int main(int argc, char **argv)
     char opts[16] = "";
     if (verbose)
         strcat(opts, "-v ");
-    if (use_dyn)
+    if (use_mt_dyn)
         strcat(opts, "-d ");
     else if (use_mp)
         strcat(opts, "-mp ");
-    if (use_bound)
+    if (use_heuristic_start)
         strcat(opts, "-b ");
+    if (use_creative)
+        strcat(opts, "-c ");
     if (use_simd)
         strcat(opts, "-e ");
     size_t optlen = strlen(opts);
