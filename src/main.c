@@ -23,21 +23,23 @@ static void format_elapsed(double sec, char *out, size_t len)
 }
 
 /* qsort helper */
-static int cmp_int(const void *a, const void *b) { return (*(const int*)a) - (*(const int*)b); }
+static int cmp_int(const void *a, const void *b) { return (*(const int *)a) - (*(const int *)b); }
 
 static void usage(const char *prog)
 {
-    fprintf(stderr, "Usage: %s <marks> [-v] [-mp] [-d] [-b] [-e] [-x]\n", prog);
+    fprintf(stderr, "Usage: %s <marks> [-v] [-mp] [-d] [-b] [-e]\n", prog);
     fprintf(stderr, "  <marks>  order (number of marks) to search\n");
-    fprintf(stderr, "  -v       verbose output\n  -mp      multithreaded solver (static split)\n  -d       dynamic OpenMP task solver\n  -b       better lower-bound start length\n  -e       SIMD-optimised bitset (experimental)\n  -x       SAT-based solver (experimental)\n");
+    fprintf(stderr, "  -v       verbose output\n  -mp      multithreaded solver (static split)\n  -d       dynamic OpenMP task solver\n  -b       better lower-bound start length\n  -e       SIMD-optimised bitset (experimental)\n");
     exit(EXIT_FAILURE);
 }
 
 int main(int argc, char **argv)
 {
-    if (argc < 2) usage(argv[0]);
+    if (argc < 2)
+        usage(argv[0]);
     int n = atoi(argv[1]);
-    if (n < 2 || n > MAX_MARKS) {
+    if (n < 2 || n > MAX_MARKS)
+    {
         fprintf(stderr, "Marks must be between 2 and %d.\n", MAX_MARKS);
         return EXIT_FAILURE;
     }
@@ -48,40 +50,40 @@ int main(int argc, char **argv)
     bool use_dyn = false;
     bool use_bound = false;
     bool use_simd = false; /* -e flag */
-    bool use_sat  = false; /* -x flag */
     /* collect flag suffix in the order they appear */
     char fsuffix[64] = "";
 
     /* parse optional flags */
-    for (int i = 2; i < argc; ++i) {
-        if (strcmp(argv[i], "-v") == 0) {
+    for (int i = 2; i < argc; ++i)
+    {
+        if (strcmp(argv[i], "-v") == 0)
+        {
             verbose = true;
             strcat(fsuffix, "_v");
         }
-        else if (strcmp(argv[i], "-mp") == 0) {
+        else if (strcmp(argv[i], "-mp") == 0)
+        {
             use_mp = true;
             strcat(fsuffix, "_mp");
         }
-        else if (strcmp(argv[i], "-d") == 0) {
+        else if (strcmp(argv[i], "-d") == 0)
+        {
             use_dyn = true;
             use_mp = false;
             strcat(fsuffix, "_d");
         }
-        else if (strcmp(argv[i], "-b") == 0) {
+        else if (strcmp(argv[i], "-b") == 0)
+        {
             use_bound = true;
             strcat(fsuffix, "_b");
         }
-        else if (strcmp(argv[i], "-e") == 0) {
+        else if (strcmp(argv[i], "-e") == 0)
+        {
             use_simd = true;
             strcat(fsuffix, "_e");
         }
-        else if (strcmp(argv[i], "-x") == 0) {
-            use_sat = true;
-            /* override mp/d flags */
-            use_mp = use_dyn = false;
-            strcat(fsuffix, "_x");
-        }
-        else usage(argv[0]);
+        else
+            usage(argv[0]);
     }
 
     const ruler_t *ref = lut_lookup_by_marks(n);
@@ -95,41 +97,54 @@ int main(int argc, char **argv)
     bool optimal = false;
 
     int target_len_start;
-    if (ref) {
+    if (ref)
+    {
         target_len_start = ref->length;
-    } else {
+    }
+    else
+    {
         int base = n * (n - 1) / 2;
         if (use_bound && n > 3)
             base += (n - 3) / 2; /* simple Hasse-style improvement */
         target_len_start = base;
     }
 
-    if (ref && verbose) {
+    if (ref && verbose)
+    {
         printf("Reference optimal ruler from LUT:\n");
         print_ruler(ref);
     }
 
-    for (int L = target_len_start; L <= MAX_LEN_BITSET; ++L) {
+    for (int L = target_len_start; L <= MAX_LEN_BITSET; ++L)
+    {
         bool ok;
-        if (use_sat) ok = solve_golomb_sat(n, L, &result, verbose);
-        else if (use_dyn) ok = solve_golomb_mt_dyn(n, L, &result, verbose);
-        else if (use_mp) ok = solve_golomb_mt(n, L, &result, verbose);
-        else ok = solve_golomb(n, L, &result, verbose);
-        if (ok) { solved = true; break; }
+        if (use_dyn)
+            ok = solve_golomb_mt_dyn(n, L, &result, verbose);
+        else if (use_mp)
+            ok = solve_golomb_mt(n, L, &result, verbose);
+        else
+            ok = solve_golomb(n, L, &result, verbose);
+        if (ok)
+        {
+            solved = true;
+            break;
+        }
     }
 
-    if (ref) {
+    if (ref)
+    {
         compared = true;
         optimal = solved && (result.length == ref->length);
     }
 
-    if (!solved) {
+    if (!solved)
+    {
         fprintf(stderr, "Could not find a Golomb ruler with %d marks within length limit.\n", n);
         return EXIT_FAILURE;
     }
 
-        clock_gettime(CLOCK_MONOTONIC, &ts_end);
-    double elapsed = (ts_end.tv_sec - ts_start.tv_sec) + (ts_end.tv_nsec - ts_start.tv_nsec)/1e9;
+    clock_gettime(CLOCK_MONOTONIC, &ts_end);
+    double elapsed = (ts_end.tv_sec - ts_start.tv_sec) + (ts_end.tv_nsec - ts_start.tv_nsec) / 1e9;
     char tbuf[32];
     format_elapsed(elapsed, tbuf, sizeof tbuf);
     printf("Found ruler: ");
@@ -137,7 +152,7 @@ int main(int argc, char **argv)
     printf("Elapsed time: %s\n", tbuf);
 
     /* compute all pairwise distances */
-    int dist[(MAX_MARKS*(MAX_MARKS-1))/2];
+    int dist[(MAX_MARKS * (MAX_MARKS - 1)) / 2];
     int dcnt = 0;
     for (int i = 0; i < result.marks; ++i)
         for (int j = i + 1; j < result.marks; ++j)
@@ -147,54 +162,76 @@ int main(int argc, char **argv)
     /* Determine missing distances */
     int miss[MAX_LEN_BITSET];
     int mcnt = 0;
-    char present[MAX_LEN_BITSET+1] = {0};
-    for (int i = 0; i < dcnt; ++i) present[dist[i]] = 1;
-    for (int d = 1; d <= result.length; ++d) {
-        if (!present[d]) miss[mcnt++] = d;
+    char present[MAX_LEN_BITSET + 1] = {0};
+    for (int i = 0; i < dcnt; ++i)
+        present[dist[i]] = 1;
+    for (int d = 1; d <= result.length; ++d)
+    {
+        if (!present[d])
+            miss[mcnt++] = d;
     }
 
     printf("Distances (%d): ", dcnt);
-    for (int i = 0; i < dcnt; ++i) printf("%d%s", dist[i], (i==dcnt-1)?"":" ");
+    for (int i = 0; i < dcnt; ++i)
+        printf("%d%s", dist[i], (i == dcnt - 1) ? "" : " ");
     printf("\nMissing (%d): ", mcnt);
-    for (int i = 0; i < mcnt; ++i) printf("%d%s", miss[i], (i==mcnt-1)?"":" ");
+    for (int i = 0; i < mcnt; ++i)
+        printf("%d%s", miss[i], (i == mcnt - 1) ? "" : " ");
     printf("\n");
 
     /* build option string */
     char opts[16] = "";
-    if (verbose) strcat(opts, "-v ");
-    if (use_dyn) strcat(opts, "-d ");
-    else if (use_mp) strcat(opts, "-mp ");
-    if (use_bound) strcat(opts, "-b ");
-    if (use_simd) strcat(opts, "-e ");
+    if (verbose)
+        strcat(opts, "-v ");
+    if (use_dyn)
+        strcat(opts, "-d ");
+    else if (use_mp)
+        strcat(opts, "-mp ");
+    if (use_bound)
+        strcat(opts, "-b ");
+    if (use_simd)
+        strcat(opts, "-e ");
     size_t optlen = strlen(opts);
-    if (optlen && opts[optlen-1] == ' ') opts[--optlen] = '\0';
+    if (optlen && opts[optlen - 1] == ' ')
+        opts[--optlen] = '\0';
 
     /* ensure output directory exists */
-    if (mkdir("out", 0755) == -1 && errno != EEXIST) {
+    if (mkdir("out", 0755) == -1 && errno != EEXIST)
+    {
         perror("mkdir out");
     }
     char fname[128];
     snprintf(fname, sizeof fname, "out/GOL_n%d%s.txt", n, fsuffix);
     FILE *fp = fopen(fname, "w");
-    if (fp) {
+    if (fp)
+    {
         fprintf(fp, "length=%d\nmarks=%d\npositions=", result.length, result.marks);
-        for (int i = 0; i < result.marks; ++i) {
-            fprintf(fp, "%d%s", result.pos[i], (i == result.marks-1) ? "" : " ");
+        for (int i = 0; i < result.marks; ++i)
+        {
+            fprintf(fp, "%d%s", result.pos[i], (i == result.marks - 1) ? "" : " ");
         }
         fprintf(fp, "\ndistances=");
-        for (int i = 0; i < dcnt; ++i) fprintf(fp, "%d%s", dist[i], (i==dcnt-1)?"":" ");
+        for (int i = 0; i < dcnt; ++i)
+            fprintf(fp, "%d%s", dist[i], (i == dcnt - 1) ? "" : " ");
         fprintf(fp, "\nmissing=");
-        for (int i = 0; i < mcnt; ++i) fprintf(fp, "%d%s", miss[i], (i==mcnt-1)?"":" ");
+        for (int i = 0; i < mcnt; ++i)
+            fprintf(fp, "%d%s", miss[i], (i == mcnt - 1) ? "" : " ");
         fprintf(fp, "\nseconds=%.6f\ntime=%s\noptions=%s\n", elapsed, tbuf, optlen ? opts : "none");
-        if (compared) fprintf(fp, "optimal=%s\n", optimal ? "yes" : "no");
+        if (compared)
+            fprintf(fp, "optimal=%s\n", optimal ? "yes" : "no");
         fclose(fp);
-    } else {
+    }
+    else
+    {
         perror("fopen");
     }
-    if (compared) {
+    if (compared)
+    {
         printf("Status: %s\n", optimal ? "Optimal ✅" : "Not optimal ❌");
         return optimal ? EXIT_SUCCESS : EXIT_FAILURE;
-    } else {
+    }
+    else
+    {
         puts("No comparison possible (length missing from LUT).\n");
         return EXIT_SUCCESS;
     }

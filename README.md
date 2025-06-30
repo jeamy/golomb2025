@@ -27,7 +27,6 @@ The default flags are `-Wall -O3 -march=native -flto -fopenmp`.  No additional l
 * `-d`  – Dynamic OpenMP **task** solver (finer load-balancing).  Set `OMP_CANCELLATION=TRUE` to enable early stopping once a ruler is found (requires OpenMP 5).
 * `-b`  – Improved lower-bound start length (Hasse bound approximation) – fewer length iterations.
 * `-e`  – AVX2-optimised bitset operations.  Gives a ~23 % speed-up on order 14 and larger.
-* `-x`  – *Experimental* SAT-based solver. Requires an external SAT solver (defaults to `kissat`).
 ### Recommended fastest run
 For most systems the following yields the lowest runtime:
 ```bash
@@ -63,19 +62,8 @@ Example:
 ./bin/golomb 12 -v      # search for optimal 12-mark ruler
 ```
 
-### SAT-based solver (`-x`)
-The SAT mode translates the Golomb ruler constraints into [DIMACS CNF](https://satcompetition.org/2009/format-benchmarks2009.html) and pipes the file to an external SAT solver.  Only the **exactly-one** and **distinct-position** constraints are encoded up-front to keep the CNF small.  After each model, the candidate ruler is checked for **distance uniqueness** inside the program; if violated a _blocking clause_ is added implicitly by re-encoding.
-
-Set the environment variable `SAT_SOLVER` to point to either `kissat`, `minisat`, or any solver accepting `p cnf` DIMACS on `stdin` and printing assignments on `stdout`:
-
-```bash
-export SAT_SOLVER=minisat
-./bin/golomb 14 -x -v
 ```
 
-If unset, the binary will look for `kissat` in `PATH`.
-
-> ⚠️  SAT encoding is currently practical up to **n ≤ 16**. Larger orders fall back to the branch-and-bound solver.
 
 ## 4  Files & Structure
 ```
