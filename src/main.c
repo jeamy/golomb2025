@@ -33,8 +33,31 @@ static void usage(const char *prog)
     exit(EXIT_FAILURE);
 }
 
+static void print_help(const char *prog_name) {
+    printf("Usage: %s <n> [options]\n\n", prog_name);
+    printf("Finds an optimal Golomb ruler with <n> marks.\n\n");
+    printf("Options:\n");
+    printf("  -v, --verbose      Enable verbose output during search.\n");
+    printf("  -s, --single       Force single-threaded solver.\n");
+    printf("  -mp                Use multi-threaded solver with static work division (default).\n");
+    printf("  -d                 Use multi-threaded solver with dynamic OpenMP tasks.\n");
+    printf("  -c                 Use 'creative' multi-threaded solver with dynamic scheduling.\n");
+    printf("  -b                 Use best-known ruler length as a starting point heuristic.\n");
+    printf("  -e                 Enable SIMD (AVX2) optimizations where available.\n");
+    printf("  -o <file>          Write the found ruler to a file.\n");
+    printf("  --help             Display this help message and exit.\n");
+}
+
 int main(int argc, char **argv)
 {
+    // Check for --help first
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--help") == 0) {
+            print_help(argv[0]);
+            return 0;
+        }
+    }
+
     if (argc < 2)
         usage(argv[0]);
     int n = atoi(argv[1]);
@@ -51,42 +74,48 @@ int main(int argc, char **argv)
     bool use_heuristic_start = false;
     bool use_creative = false;
     bool use_simd = false; /* -e flag */
-    /* collect flag suffix in the order they appear */
-    char fsuffix[64] = "";
-
+    char *output_file = NULL;
+    bool force_single_thread = false;
     /* parse optional flags */
     for (int i = 2; i < argc; ++i)
     {
         if (strcmp(argv[i], "-v") == 0)
         {
             verbose = true;
-            strcat(fsuffix, "_v");
+        }
+        else if (strcmp(argv[i], "-s") == 0)
+        {
+            force_single_thread = true;
+        }
+        else if (strcmp(argv[i], "-o") == 0)
+        {
+            if (i + 1 < argc) {
+                output_file = argv[++i];
+            } else {
+                fprintf(stderr, "Error: -o option requires a filename.\n");
+                return EXIT_FAILURE;
+            }
         }
         else if (strcmp(argv[i], "-mp") == 0)
         {
             use_mp = true;
-            strcat(fsuffix, "_mp");
         }
         else if (strcmp(argv[i], "-d") == 0)
         {
             use_mt_dyn = true;
             use_mp = false;
-            strcat(fsuffix, "_d");
         }
         else if (strcmp(argv[i], "-b") == 0)
         {
             use_heuristic_start = true;
-            strcat(fsuffix, "_b");
         }
         else if (strcmp(argv[i], "-c") == 0)
         {
             use_creative = true;
-            strcat(fsuffix, "_c");
         }
         else if (strcmp(argv[i], "-e") == 0)
         {
             use_simd = true;
-            strcat(fsuffix, "_e");
         }
         else
             usage(argv[0]);
@@ -121,21 +150,30 @@ int main(int argc, char **argv)
         print_ruler(ref);
     }
 
-    if (use_creative) {
-        solved = solve_golomb_creative(n, &result, verbose);
-    } else {
-        for (int L = target_len_start; L <= MAX_LEN_BITSET; ++L)
+    for (int L = target_len_start; L <= MAX_LEN_BITSET; ++L)
+    {
+        bool ok;
+        if (force_single_thread)
+            ok = solve_golomb(n, L, &result, verbose);
+        else if (use_creative)
+            ok = solve_golomb_creative(n, L, &result, verbose);
+        else if (use_mt_dyn)
+            ok = solve_golomb_mt_dyn(n, L, &result, verbose);
+        else if (use_mp)
+            ok = solve_golomb_mt(n, L, &result, verbose);
+        else
+            ok = solve_golomb(n, L, &result, verbose);
+
+        if (ok)
         {
-            bool ok = false;
-            if (use_mt_dyn) ok = solve_golomb_mt_dyn(n, L, &result, verbose);
-            else if (use_mp) ok = solve_golomb_mt(n, L, &result, verbose);
-            else ok = solve_golomb(n, L, &result, verbose);
-            
-            if (ok)
-            {
-                solved = true;
+            solved = true;
+            if (use_heuristic_start || ref) {
                 break;
             }
+            target_len_start = result.length - 1;
+        }
+        if (ref && L >= result.length) {
+            break;
         }
     }
 
@@ -187,31 +225,54 @@ int main(int argc, char **argv)
         printf("%d%s", miss[i], (i == mcnt - 1) ? "" : " ");
     printf("\n");
 
-    /* build option string */
-    char opts[16] = "";
-    if (verbose)
-        strcat(opts, "-v ");
-    if (use_mt_dyn)
-        strcat(opts, "-d ");
-    else if (use_mp)
-        strcat(opts, "-mp ");
-    if (use_heuristic_start)
-        strcat(opts, "-b ");
-    if (use_creative)
-        strcat(opts, "-c ");
-    if (use_simd)
-        strcat(opts, "-e ");
-    size_t optlen = strlen(opts);
-    if (optlen && opts[optlen - 1] == ' ')
-        opts[--optlen] = '\0';
+    /* build option string and filename suffix from flags */
+    char opts[64] = "";
+    char fsuffix[64] = "";
 
-    /* ensure output directory exists */
-    if (mkdir("out", 0755) == -1 && errno != EEXIST)
-    {
-        perror("mkdir out");
+    // Solver type flags (mutually exclusive, reflects solver choice)
+    if (force_single_thread) {
+        strcat(opts, "-s ");
+        strcat(fsuffix, "_s");
+    } else if (use_creative) {
+        strcat(opts, "-c ");
+        strcat(fsuffix, "_c");
+    } else if (use_mt_dyn) {
+        strcat(opts, "-d ");
+        strcat(fsuffix, "_d");
+    } else if (use_mp) {
+        strcat(opts, "-mp ");
+        strcat(fsuffix, "_mp");
     }
+
+    // Additive flags
+    if (use_heuristic_start) {
+        strcat(opts, "-b ");
+        strcat(fsuffix, "_b");
+    }
+    if (use_simd) {
+        strcat(opts, "-e ");
+        strcat(fsuffix, "_e");
+    }
+    if (verbose) {
+        strcat(opts, "-v ");
+        strcat(fsuffix, "_v");
+    }
+
+    size_t optlen = strlen(opts);
+    if (optlen > 0 && opts[optlen - 1] == ' ') {
+        opts[--optlen] = '\0';
+    }
+
     char fname[128];
-    snprintf(fname, sizeof fname, "out/GOL_n%d%s.txt", n, fsuffix);
+    if (output_file != NULL) {
+        strncpy(fname, output_file, sizeof(fname) - 1);
+        fname[sizeof(fname) - 1] = '\0';
+    } else {
+        if (mkdir("out", 0755) == -1 && errno != EEXIST) {
+            perror("mkdir out");
+        }
+        snprintf(fname, sizeof fname, "out/GOL_n%d%s.txt", n, fsuffix);
+    }
     FILE *fp = fopen(fname, "w");
     if (fp)
     {

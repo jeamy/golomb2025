@@ -3,6 +3,8 @@
 
 #include <stdio.h>
 #include <stdbool.h>
+#include <stdint.h>
+#include <stdint.h>
 
 #define MAX_MARKS 32   /* maximal unterstützte Markierungen */
 #ifndef MAX_LEN_BITSET
@@ -35,6 +37,9 @@ void print_ruler(const ruler_t *r);
 
 /*--------- Solver API (solver.c) ----------------------------------------*/
 
+/* Recursive branch&bound search function, now public */
+bool dfs(int depth, int n, int target_len, int *pos, uint64_t *dist_bs, bool verbose);
+
 /*
  * Attempts to find an optimal ruler of given mark count n and maximum length L.
  * On success, writes result into out and returns true; else returns false.
@@ -46,8 +51,8 @@ bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose);
 /* Dynamic OpenMP task-based solver (enable with -d) */
 bool solve_golomb_mt_dyn(int n, int target_length, ruler_t *out, bool verbose);
 
-/* Creative solver using Bounded Projective Search */
-bool solve_golomb_creative(int n, ruler_t *out, bool verbose);
+/* Creative solver (now queue-based) */
+bool solve_golomb_creative(int n, int target_length, ruler_t *out, bool verbose);
 
 
 /* Global runtime flag: 1 => use AVX2 SIMD path where available */

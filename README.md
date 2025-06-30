@@ -22,11 +22,27 @@ The default flags are `-Wall -O3 -march=native -flto -fopenmp`.  No additional l
 ./bin/golomb <marks> [-v] [-mp]
 ```
 * **marks** – Target order *n* (number of marks).
-* `-v` – Verbose mode (prints intermediate search states).
-* `-mp` – Multithreaded solver with static split (fast, good scaling).
-* `-d`  – Dynamic OpenMP **task** solver (finer load-balancing).  Set `OMP_CANCELLATION=TRUE` to enable early stopping once a ruler is found (requires OpenMP 5).
-* `-b`  – Improved lower-bound start length (Hasse bound approximation) – fewer length iterations.
-* `-e`  – AVX2-optimised bitset operations.  Gives a ~23 % speed-up on order 14 and larger.
+
+**General Options**
+| Flag | Description |
+|------|-------------|
+| `-v` | Verbose mode (prints intermediate search states). |
+| `-o <file>` | Write result to a specific output file. |
+| `--help`| Display this help message and exit. |
+
+**Solver Types**
+| Flag | Description |
+|------|-------------|
+| `-s` | Force single-threaded execution (highest priority). |
+| `-c` | Use creative solver. |
+| `-d` | Use dynamic task-based solver. |
+| `-mp`| Use multi-processing solver (static split, lowest priority). |
+
+**Optimizations**
+| Flag | Description |
+|------|-------------|
+| `-b` | Use best-known ruler length as a starting point heuristic. |
+| `-e` | Enable SIMD (AVX2) optimizations where available. |
 ### Recommended fastest run
 For most systems the following yields the lowest runtime:
 ```bash
@@ -96,7 +112,18 @@ The solver uses recursive backtracking with pruning:
 
 ● **Without LUT entry** – If the order is beyond the LUT, the solver incrementally tests longer lengths until a valid ruler is found. No comparison is possible, but runtime is still measured and printed.
 
-### Sample runtime (order n = 14)
+### Sample Runtimes
+
+#### Order n = 13 (this project)
+
+| Flags | Time |
+|-------|------|
+| `-mp` | **3.77 s** |
+| `-c`  | 4.15 s |
+
+The creative solver (`-c`) is competitive but slightly slower than the finely-tuned static solver (`-mp`) for this order.
+
+#### Order n = 14 (original README)
 | Flags | Time |
 |-------|------|
 | `-mp` | **152.9 s** |
@@ -109,6 +136,42 @@ All runs used `env OMP_CANCELLATION=TRUE`. The dynamic task solver (`-d`) remain
 
 Take-aways
 * SIMD (`-e`) helps once ≥ 90 distances are tested per node (depth ≥ 16).
+
+### Option Combinations
+
+#### Mutually Exclusive Options
+
+The solver flags determine the core algorithm used and are mutually exclusive. If multiple solver flags are provided, the program will use only one based on the following priority:
+
+1.  `-s` (Single-threaded)
+2.  `-c` (Creative solver)
+3.  `-d` (Dynamic task solver)
+4.  `-mp` (Static multi-threaded solver)
+
+For example, if both `-mp` and `-s` are used, the `-s` flag takes precedence, and the program will run on a single thread.
+
+#### Recommended Combinations
+
+-   **For fastest performance:** The static solver (`-mp`) is consistently the fastest option for parallel execution. For larger orders (n ≥ 14), enabling SIMD (`-e`) can provide an additional speed boost.
+    ```bash
+    # Recommended for n < 14
+    ./bin/golomb <n> -mp
+
+    # Recommended for n >= 14
+    ./bin/golomb <n> -mp -e
+    ```
+
+-   **For guaranteed single-threaded execution:** Use the `-s` flag. This is the simplest and most reliable way to run without parallelisation.
+    ```bash
+    ./bin/golomb <n> -s
+    ```
+
+-   **For the dynamic task solver:** The `-d` solver requires the `OMP_CANCELLATION` environment variable to be enabled to work effectively.
+    ```bash
+    env OMP_CANCELLATION=TRUE ./bin/golomb <n> -d
+    ```
+
+The flags `-v` (verbose), `-b` (heuristic start), and `-o <file>` (output file) can be combined with any of the above solver configurations.
 * Static split (`-mp`) has the lowest overhead and scales ~linear with cores.
 * Dynamic tasks (`-d`) are only worthwhile with OpenMP 5 cancellation enabled.
 

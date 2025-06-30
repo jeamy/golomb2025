@@ -52,7 +52,7 @@ static inline int test_bit(const uint64_t *bs, int idx)
 }
 
 /* Recursive branch&bound with distance bitset */
-static bool dfs(int depth, int n, int target_len, int *pos, uint64_t *dist_bs, bool verbose)
+bool dfs(int depth, int n, int target_len, int *pos, uint64_t *dist_bs, bool verbose)
 {
     if (depth == n)
     {
