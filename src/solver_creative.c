@@ -23,8 +23,6 @@ bool solve_golomb_creative(int n, int target_length, ruler_t *out, bool verbose)
 
     #pragma omp parallel for schedule(dynamic, 1)
     for (int m2 = 1; m2 <= half; ++m2) {
-        if (found) continue;
-
         for (int m3 = m2 + 1; m3 <= target_length - (n - 3); ++m3) {
             if (found) break; 
             if (m3 - m2 == m2) continue;
