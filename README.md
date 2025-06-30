@@ -50,9 +50,9 @@ env OMP_NUM_THREADS=$(nproc) \
     OMP_PLACES=cores OMP_PROC_BIND=close \
     ./bin/golomb <n> -b -mp -e
 ```
-• `-b` skips unnecessary length iterations.  
-• `-mp` uses a low-overhead static split with good scaling.  
-• `-e` enables AVX2 SIMD (~20-25 % speed-up for n ≥ 14).  
+- `-b` skips unnecessary length iterations.
+- `-mp` uses a low-overhead static split with good scaling.
+- `-e` enables AVX2 SIMD (~20-25 % speed-up for n ≥ 14).
 Remove `-e` for pre-AVX2 CPUs or very small orders (< 10).
 
 * The solver writes results to `out/GOL_n<marks>.txt`.  See “Output file format” below.
@@ -76,8 +76,6 @@ The same distance and missing lists are echoed to the console after the ruler is
 Example:
 ```bash
 ./bin/golomb 12 -v      # search for optimal 12-mark ruler
-```
-
 ```
 
 
@@ -105,8 +103,8 @@ The solver uses recursive backtracking with pruning:
 3. Use a lower‐bound heuristic: if even by spacing the remaining marks 1 apart the current tentative length cannot be met, prune.
 4. Apply symmetry-breaking: the second mark is limited to ≤ L/2, eliminating mirrored solutions.
 5. Parallelisation
-   • `-mp` – static split: threads fixed on 2nd & 3rd marks.
-   • `-d`  – dynamic tasks: OpenMP tasks from 2nd mark downward for automatic work-stealing.
+   - `-mp` – static split: threads fixed on 2nd & 3rd marks.
+   - `-d`  – dynamic tasks: OpenMP tasks from 2nd mark downward for automatic work-stealing.
 
 ● **With LUT entry** – If an optimal length for the requested order exists in the LUT, the solver starts at that length and verifies the result: *Optimal ✅* or *Not optimal ❌*.
 
