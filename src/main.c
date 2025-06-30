@@ -27,9 +27,9 @@ static int cmp_int(const void *a, const void *b) { return (*(const int*)a) - (*(
 
 static void usage(const char *prog)
 {
-    fprintf(stderr, "Usage: %s <marks> [-v] [-mp] [-d] [-b] [-e]\n", prog);
+    fprintf(stderr, "Usage: %s <marks> [-v] [-mp] [-d] [-b] [-e] [-x]\n", prog);
     fprintf(stderr, "  <marks>  order (number of marks) to search\n");
-    fprintf(stderr, "  -v       verbose output\n  -mp      multithreaded solver (static split)\n  -d       dynamic OpenMP task solver\n  -b       better lower-bound start length\n  -e       SIMD-optimised bitset (experimental)\n");
+    fprintf(stderr, "  -v       verbose output\n  -mp      multithreaded solver (static split)\n  -d       dynamic OpenMP task solver\n  -b       better lower-bound start length\n  -e       SIMD-optimised bitset (experimental)\n  -x       SAT-based solver (experimental)\n");
     exit(EXIT_FAILURE);
 }
 
@@ -48,6 +48,7 @@ int main(int argc, char **argv)
     bool use_dyn = false;
     bool use_bound = false;
     bool use_simd = false; /* -e flag */
+    bool use_sat  = false; /* -x flag */
     /* collect flag suffix in the order they appear */
     char fsuffix[64] = "";
 
@@ -73,6 +74,12 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "-e") == 0) {
             use_simd = true;
             strcat(fsuffix, "_e");
+        }
+        else if (strcmp(argv[i], "-x") == 0) {
+            use_sat = true;
+            /* override mp/d flags */
+            use_mp = use_dyn = false;
+            strcat(fsuffix, "_x");
         }
         else usage(argv[0]);
     }
@@ -104,7 +111,8 @@ int main(int argc, char **argv)
 
     for (int L = target_len_start; L <= MAX_LEN_BITSET; ++L) {
         bool ok;
-        if (use_dyn) ok = solve_golomb_mt_dyn(n, L, &result, verbose);
+        if (use_sat) ok = solve_golomb_sat(n, L, &result, verbose);
+        else if (use_dyn) ok = solve_golomb_mt_dyn(n, L, &result, verbose);
         else if (use_mp) ok = solve_golomb_mt(n, L, &result, verbose);
         else ok = solve_golomb(n, L, &result, verbose);
         if (ok) { solved = true; break; }
