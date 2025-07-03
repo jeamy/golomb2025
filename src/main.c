@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <pthread.h>
 
 #include <stdio.h>
 #include <sys/stat.h>
@@ -48,6 +49,28 @@ static void print_help(const char *prog_name) {
     printf("  --help             Display this help message and exit.\n");
 }
 
+static volatile int g_current_L = -1;
+static volatile int g_done = 0;
+static struct timespec g_ts_start;
+static double g_vt_sec = 0.0;
+
+static void *heartbeat_thread(void *arg) {
+    while (!g_done) {
+        struct timespec ts_now;
+        clock_gettime(CLOCK_MONOTONIC, &ts_now);
+        double since = (ts_now.tv_sec - g_ts_start.tv_sec) + (ts_now.tv_nsec - g_ts_start.tv_nsec)/1e9;
+        char tbuf[32];
+        format_elapsed(since, tbuf, sizeof tbuf);
+        int L = g_current_L;
+        if (L >= 0)
+            fprintf(stdout, "[VT] %s elapsed – current L=%d\n", tbuf, L);
+        fflush(stdout);
+        struct timespec req = { (time_t)g_vt_sec, (long)((g_vt_sec - (time_t)g_vt_sec)*1e9) };
+        nanosleep(&req, NULL);
+    }
+    return NULL;
+}
+
 int main(int argc, char **argv)
 {
     // Check for --help first
@@ -68,6 +91,7 @@ int main(int argc, char **argv)
     }
     struct timespec ts_start, ts_end;
     clock_gettime(CLOCK_MONOTONIC, &ts_start);
+    g_ts_start = ts_start;
     time_t t_start_wall = time(NULL);
     char start_iso[32]; strftime(start_iso, sizeof start_iso, "%F %T", localtime(&t_start_wall));
     printf("Start time: %s\n", start_iso);
@@ -75,7 +99,8 @@ int main(int argc, char **argv)
     bool verbose = false;
     bool use_mp = false;
     bool use_mt_dyn = false;
-    int vt_minutes = 0;            /* heartbeat interval (0 = disabled) */
+    double vt_sec = 0.0;          /* heartbeat interval in seconds (0 = disabled) */
+    pthread_t hb_thread;
     bool use_heuristic_start = false;
     bool use_creative = false;
     bool use_simd = false; /* -e flag */
@@ -120,8 +145,9 @@ int main(int argc, char **argv)
         }
         else if (strcmp(argv[i], "-vt") == 0) {
             if (i + 1 < argc) {
-                vt_minutes = atoi(argv[++i]);
-                if (vt_minutes < 1) vt_minutes = 0; /* disable if non-positive */
+                vt_sec = atof(argv[++i]) * 60.0;
+                g_vt_sec = vt_sec;
+                if (vt_sec < 0.01) vt_sec = 0.0;
             } else {
                 fprintf(stderr, "Error: -vt option requires minutes argument.\n");
                 return EXIT_FAILURE;
@@ -164,7 +190,8 @@ int main(int argc, char **argv)
         print_ruler(ref);
     }
 
-    double next_vt = (vt_minutes > 0) ? vt_minutes * 60.0 : 1e18;
+    g_current_L = target_len_start;
+    if (vt_sec > 0.0) pthread_create(&hb_thread, NULL, heartbeat_thread, NULL);
     for (int L = target_len_start; L <= MAX_LEN_BITSET; ++L)
     {
         bool ok;
@@ -178,18 +205,6 @@ int main(int argc, char **argv)
             ok = solve_golomb_mt(n, L, &result, verbose);
         else
             ok = solve_golomb(n, L, &result, verbose);
-
-        if (vt_minutes > 0) {
-            struct timespec now_ts; clock_gettime(CLOCK_MONOTONIC, &now_ts);
-            double since_start = (now_ts.tv_sec - ts_start.tv_sec) +
-                                 (now_ts.tv_nsec - ts_start.tv_nsec)/1e9;
-            if (since_start >= next_vt) {
-                char tbuf[32]; format_elapsed(since_start, tbuf, sizeof tbuf);
-                printf("[VT] %s elapsed – current L=%d\n", tbuf, L);
-                fflush(stdout);
-                next_vt += vt_minutes * 60.0;
-            }
-        }
 
         if (ok)
         {
@@ -209,6 +224,9 @@ int main(int argc, char **argv)
         compared = true;
         optimal = solved && (result.length == ref->length);
     }
+
+    g_done = 1;
+    if (vt_sec > 0.0) pthread_join(hb_thread, NULL);
 
     if (!solved)
     {
