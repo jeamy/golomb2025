@@ -68,9 +68,14 @@ int main(int argc, char **argv)
     }
     struct timespec ts_start, ts_end;
     clock_gettime(CLOCK_MONOTONIC, &ts_start);
+    time_t t_start_wall = time(NULL);
+    char start_iso[32]; strftime(start_iso, sizeof start_iso, "%F %T", localtime(&t_start_wall));
+    printf("Start time: %s\n", start_iso);
+
     bool verbose = false;
     bool use_mp = false;
     bool use_mt_dyn = false;
+    int vt_minutes = 0;            /* heartbeat interval (0 = disabled) */
     bool use_heuristic_start = false;
     bool use_creative = false;
     bool use_simd = false; /* -e flag */
@@ -113,6 +118,15 @@ int main(int argc, char **argv)
         {
             use_creative = true;
         }
+        else if (strcmp(argv[i], "-vt") == 0) {
+            if (i + 1 < argc) {
+                vt_minutes = atoi(argv[++i]);
+                if (vt_minutes < 1) vt_minutes = 0; /* disable if non-positive */
+            } else {
+                fprintf(stderr, "Error: -vt option requires minutes argument.\n");
+                return EXIT_FAILURE;
+            }
+        }
         else if (strcmp(argv[i], "-e") == 0)
         {
             use_simd = true;
@@ -150,6 +164,7 @@ int main(int argc, char **argv)
         print_ruler(ref);
     }
 
+    double next_vt = (vt_minutes > 0) ? vt_minutes * 60.0 : 1e18;
     for (int L = target_len_start; L <= MAX_LEN_BITSET; ++L)
     {
         bool ok;
@@ -163,6 +178,18 @@ int main(int argc, char **argv)
             ok = solve_golomb_mt(n, L, &result, verbose);
         else
             ok = solve_golomb(n, L, &result, verbose);
+
+        if (vt_minutes > 0) {
+            struct timespec now_ts; clock_gettime(CLOCK_MONOTONIC, &now_ts);
+            double since_start = (now_ts.tv_sec - ts_start.tv_sec) +
+                                 (now_ts.tv_nsec - ts_start.tv_nsec)/1e9;
+            if (since_start >= next_vt) {
+                char tbuf[32]; format_elapsed(since_start, tbuf, sizeof tbuf);
+                printf("[VT] %s elapsed – current L=%d\n", tbuf, L);
+                fflush(stdout);
+                next_vt += vt_minutes * 60.0;
+            }
+        }
 
         if (ok)
         {
@@ -193,6 +220,10 @@ int main(int argc, char **argv)
     double elapsed = (ts_end.tv_sec - ts_start.tv_sec) + (ts_end.tv_nsec - ts_start.tv_nsec) / 1e9;
     char tbuf[32];
     format_elapsed(elapsed, tbuf, sizeof tbuf);
+    time_t t_end_wall = time(NULL);
+    char end_iso[32]; strftime(end_iso, sizeof end_iso, "%F %T", localtime(&t_end_wall));
+    printf("End time:   %s\n", end_iso);
+
     printf("Found ruler: ");
     print_ruler(&result);
     printf("Elapsed time: %s\n", tbuf);

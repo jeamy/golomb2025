@@ -27,6 +27,7 @@ The default flags are `-Wall -O3 -march=native -flto -fopenmp`.  No additional l
 | Flag | Description |
 |------|-------------|
 | `-v` | Verbose mode (prints intermediate search states). |
+| `-vt <min>` | Periodic heartbeat every <min> minutes (prints elapsed time and current length). |
 | `-o <file>` | Write result to a specific output file. |
 | `--help`| Display this help message and exit. |
 
