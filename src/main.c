@@ -4,6 +4,9 @@
 #include <string.h>
 #include <time.h>
 #include <pthread.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include "bench.h"
 
 #include <stdio.h>
 #include <sys/stat.h>
@@ -30,11 +33,12 @@ static void usage(const char *prog)
 {
     fprintf(stderr, "Usage: %s <marks> [-v] [-mp] [-d] [-b] [-e]\n", prog);
     fprintf(stderr, "  <marks>  order (number of marks) to search\n");
-    fprintf(stderr, "  -v       verbose output\n  -mp      multithreaded solver (static split)\n  -d       dynamic OpenMP task solver\n  -b       better lower-bound start length\n  -e       SIMD-optimised bitset (experimental)\n");
+    fprintf(stderr, "  -v       verbose output\n  -mp      multithreaded solver (static split)\n  -d       dynamic OpenMP task solver\n  -b       better lower-bound start length\n  -e       SIMD-optimised bitset (experimental)\n  -a       Use hand-written assembler routines (experimental)\n  -t       Run built-in benchmark suite for given <marks>\n");
     exit(EXIT_FAILURE);
 }
 
-static void print_help(const char *prog_name) {
+static void print_help(const char *prog_name)
+{
     printf("Usage: %s <n> [options]\n\n", prog_name);
     printf("Finds an optimal Golomb ruler with <n> marks.\n\n");
     printf("Options:\n");
@@ -45,6 +49,8 @@ static void print_help(const char *prog_name) {
     printf("  -c                 Use 'creative' multi-threaded solver with dynamic scheduling.\n");
     printf("  -b                 Use best-known ruler length as a starting point heuristic.\n");
     printf("  -e                 Enable SIMD (AVX2) optimizations where available.\n");
+    printf("  -a                 Use hand-written assembler routines.\n");
+    printf("  -t                 Run built-in benchmark suite for given <n>.\n");
     printf("  -o <file>          Write the found ruler to a file.\n");
     printf("  --help             Display this help message and exit.\n");
 }
@@ -54,18 +60,21 @@ static volatile int g_done = 0;
 static struct timespec g_ts_start;
 static double g_vt_sec = 0.0;
 
-static void *heartbeat_thread(void *arg) {
-    while (!g_done) {
+
+static void *heartbeat_thread(void *arg)
+{
+    while (!g_done)
+    {
         struct timespec ts_now;
         clock_gettime(CLOCK_MONOTONIC, &ts_now);
-        double since = (ts_now.tv_sec - g_ts_start.tv_sec) + (ts_now.tv_nsec - g_ts_start.tv_nsec)/1e9;
+        double since = (ts_now.tv_sec - g_ts_start.tv_sec) + (ts_now.tv_nsec - g_ts_start.tv_nsec) / 1e9;
         char tbuf[32];
         format_elapsed(since, tbuf, sizeof tbuf);
         int L = g_current_L;
         if (L >= 0)
             fprintf(stdout, "[VT] %s elapsed – current L=%d\n", tbuf, L);
         fflush(stdout);
-        struct timespec req = { (time_t)g_vt_sec, (long)((g_vt_sec - (time_t)g_vt_sec)*1e9) };
+        struct timespec req = {(time_t)g_vt_sec, (long)((g_vt_sec - (time_t)g_vt_sec) * 1e9)};
         nanosleep(&req, NULL);
     }
     return NULL;
@@ -74,8 +83,10 @@ static void *heartbeat_thread(void *arg) {
 int main(int argc, char **argv)
 {
     // Check for --help first
-    for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "--help") == 0) {
+    for (int i = 1; i < argc; ++i)
+    {
+        if (strcmp(argv[i], "--help") == 0)
+        {
             print_help(argv[0]);
             return 0;
         }
@@ -93,17 +104,20 @@ int main(int argc, char **argv)
     clock_gettime(CLOCK_MONOTONIC, &ts_start);
     g_ts_start = ts_start;
     time_t t_start_wall = time(NULL);
-    char start_iso[32]; strftime(start_iso, sizeof start_iso, "%F %T", localtime(&t_start_wall));
+    char start_iso[32];
+    strftime(start_iso, sizeof start_iso, "%F %T", localtime(&t_start_wall));
     printf("Start time: %s\n", start_iso);
 
     bool verbose = false;
+    bool run_tests = false;
     bool use_mp = false;
     bool use_mt_dyn = false;
-    double vt_sec = 0.0;          /* heartbeat interval in seconds (0 = disabled) */
+    double vt_sec = 0.0; /* heartbeat interval in seconds (0 = disabled) */
     pthread_t hb_thread;
     bool use_heuristic_start = false;
     bool use_creative = false;
     bool use_simd = false; /* -e flag */
+    bool use_asm = false;  /* -a flag */
     char *output_file = NULL;
     bool force_single_thread = false;
     /* parse optional flags */
@@ -119,9 +133,12 @@ int main(int argc, char **argv)
         }
         else if (strcmp(argv[i], "-o") == 0)
         {
-            if (i + 1 < argc) {
+            if (i + 1 < argc)
+            {
                 output_file = argv[++i];
-            } else {
+            }
+            else
+            {
                 fprintf(stderr, "Error: -o option requires a filename.\n");
                 return EXIT_FAILURE;
             }
@@ -143,12 +160,17 @@ int main(int argc, char **argv)
         {
             use_creative = true;
         }
-        else if (strcmp(argv[i], "-vt") == 0) {
-            if (i + 1 < argc) {
+        else if (strcmp(argv[i], "-vt") == 0)
+        {
+            if (i + 1 < argc)
+            {
                 vt_sec = atof(argv[++i]) * 60.0;
                 g_vt_sec = vt_sec;
-                if (vt_sec < 0.01) vt_sec = 0.0;
-            } else {
+                if (vt_sec < 0.01)
+                    vt_sec = 0.0;
+            }
+            else
+            {
                 fprintf(stderr, "Error: -vt option requires minutes argument.\n");
                 return EXIT_FAILURE;
             }
@@ -157,15 +179,31 @@ int main(int argc, char **argv)
         {
             use_simd = true;
         }
+        else if (strcmp(argv[i], "-a") == 0)
+        {
+            use_asm = true;
+        }
+        else if (strcmp(argv[i], "-t") == 0)
+        {
+            run_tests = true;
+        }
         else
             usage(argv[0]);
+    }
+
+    if (run_tests)
+    {
+        run_benchmarks(argv[0], n);
+        return 0;
     }
 
     const ruler_t *ref = lut_lookup_by_marks(n);
 
     ruler_t result;
     extern bool g_use_simd;
+    extern bool g_use_asm;
     g_use_simd = use_simd;
+    g_use_asm = use_asm;
 
     bool solved = false;
     bool compared = false;
@@ -191,7 +229,8 @@ int main(int argc, char **argv)
     }
 
     g_current_L = target_len_start;
-    if (vt_sec > 0.0) pthread_create(&hb_thread, NULL, heartbeat_thread, NULL);
+    if (vt_sec > 0.0)
+        pthread_create(&hb_thread, NULL, heartbeat_thread, NULL);
     for (int L = target_len_start; L <= MAX_LEN_BITSET; ++L)
     {
         bool ok;
@@ -209,12 +248,14 @@ int main(int argc, char **argv)
         if (ok)
         {
             solved = true;
-            if (use_heuristic_start || ref) {
+            if (use_heuristic_start || ref)
+            {
                 break;
             }
             target_len_start = result.length - 1;
         }
-        if (ref && L >= result.length) {
+        if (ref && L >= result.length)
+        {
             break;
         }
     }
@@ -226,7 +267,8 @@ int main(int argc, char **argv)
     }
 
     g_done = 1;
-    if (vt_sec > 0.0) pthread_join(hb_thread, NULL);
+    if (vt_sec > 0.0)
+        pthread_join(hb_thread, NULL);
 
     if (!solved)
     {
@@ -239,7 +281,8 @@ int main(int argc, char **argv)
     char tbuf[32];
     format_elapsed(elapsed, tbuf, sizeof tbuf);
     time_t t_end_wall = time(NULL);
-    char end_iso[32]; strftime(end_iso, sizeof end_iso, "%F %T", localtime(&t_end_wall));
+    char end_iso[32];
+    strftime(end_iso, sizeof end_iso, "%F %T", localtime(&t_end_wall));
     printf("End time:   %s\n", end_iso);
 
     printf("Found ruler: ");
@@ -279,45 +322,65 @@ int main(int argc, char **argv)
     char fsuffix[64] = "";
 
     // Solver type flags (mutually exclusive, reflects solver choice)
-    if (force_single_thread) {
+    if (force_single_thread)
+    {
         strcat(opts, "-s ");
         strcat(fsuffix, "_s");
-    } else if (use_creative) {
+    }
+    else if (use_creative)
+    {
         strcat(opts, "-c ");
         strcat(fsuffix, "_c");
-    } else if (use_mt_dyn) {
+    }
+    else if (use_mt_dyn)
+    {
         strcat(opts, "-d ");
         strcat(fsuffix, "_d");
-    } else if (use_mp) {
+    }
+    else if (use_mp)
+    {
         strcat(opts, "-mp ");
         strcat(fsuffix, "_mp");
     }
 
     // Additive flags
-    if (use_heuristic_start) {
+    if (use_heuristic_start)
+    {
         strcat(opts, "-b ");
         strcat(fsuffix, "_b");
     }
-    if (use_simd) {
+    if (use_simd)
+    {
         strcat(opts, "-e ");
         strcat(fsuffix, "_e");
     }
-    if (verbose) {
+    if (use_asm)
+    {
+        strcat(opts, "-a ");
+        strcat(fsuffix, "_a");
+    }
+    if (verbose)
+    {
         strcat(opts, "-v ");
         strcat(fsuffix, "_v");
     }
 
     size_t optlen = strlen(opts);
-    if (optlen > 0 && opts[optlen - 1] == ' ') {
+    if (optlen > 0 && opts[optlen - 1] == ' ')
+    {
         opts[--optlen] = '\0';
     }
 
     char fname[128];
-    if (output_file != NULL) {
+    if (output_file != NULL)
+    {
         strncpy(fname, output_file, sizeof(fname) - 1);
         fname[sizeof(fname) - 1] = '\0';
-    } else {
-        if (mkdir("out", 0755) == -1 && errno != EEXIST) {
+    }
+    else
+    {
+        if (mkdir("out", 0755) == -1 && errno != EEXIST)
+        {
             perror("mkdir out");
         }
         snprintf(fname, sizeof fname, "out/GOL_n%d%s.txt", n, fsuffix);

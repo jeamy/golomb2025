@@ -19,7 +19,7 @@ The default flags are `-Wall -O3 -march=native -flto -fopenmp`.  No additional l
 
 ## 3  Usage
 ```bash
-./bin/golomb <marks> [-v] [-mp]
+./bin/golomb <marks> [-v] [-mp] [-a]
 ```
 * **marks** – Target order *n* (number of marks).
 
@@ -44,6 +44,8 @@ The default flags are `-Wall -O3 -march=native -flto -fopenmp`.  No additional l
 |------|-------------|
 | `-b` | Use best-known ruler length as a starting point heuristic. |
 | `-e` | Enable SIMD (AVX2) optimizations where available. |
+| `-a` | Use hand-written assembler hot-spot for distance checking (x86-64 only). |
+| `-t` | Run built-in benchmark suite for the given order and write `out/bench_n<marks>.txt`. |
 ### Recommended fastest run
 For most systems the following yields the lowest runtime:
 ```bash
@@ -117,7 +119,10 @@ The solver uses recursive backtracking with pruning:
 
 | Flags | Time |
 |-------|------|
-| `-mp` | **3.77 s** |
+| `-mp` | **3.82 s** |
+| `-mp -b` | 4.06 s |
+| `-mp -e` | 3.83 s |
+| `-mp -a` | 3.81 s |
 | `-c`  | 4.15 s |
 
 The creative solver (`-c`) is competitive but slightly slower than the finely-tuned static solver (`-mp`) for this order.
@@ -128,13 +133,16 @@ The creative solver (`-c`) is competitive but slightly slower than the finely-tu
 | `-mp` | **152.9 s** |
 | `-mp -b` | 158.9 s |
 | `-mp -b -e` | 154.0 s |
-| `-d -e` | 2270 s |
+| `-d` | 59.0 s |
+| `-d -e` | 59.8 s |
+| `-d -a` | 59.5 s |
 | `-mp -d -e` | 2285 s |
 
 All runs used `env OMP_CANCELLATION=TRUE`. The dynamic task solver (`-d`) remains roughly **15×** slower (even the mixed `-mp -d` mode) even with SIMD and cancellation. AVX2 (`-e`) shows its benefit chiefly for the static solver and for larger orders.
 
 Take-aways
 * SIMD (`-e`) helps once ≥ 90 distances are tested per node (depth ≥ 16).
+* Assembler hot-spot (`-a`) optimises the distance-duplication test; effect is negligible for n ≤ 13 (<1 %) but expected to grow for larger orders (n ≥ 16).
 
 ### Option Combinations
 

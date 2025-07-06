@@ -3,9 +3,29 @@
 #include <immintrin.h> /* AVX2 intrinsics */
 #include <stdint.h>
 
+/* Optional hand-written assembler version (FASM). Will be NULL if not linked. */
+extern int test_any_dup8_avx2_asm(const uint64_t *bs, const int *dist8)
+        __attribute__((weak));
+extern bool g_use_asm;
+
+/* intrinsic fallback prototype */
+static inline int test_any_dup8_avx2(const uint64_t *bs, const int *dist8);
+
+
+
+/* Select best available implementation at runtime */
+static inline int test_any_dup8(const uint64_t *bs, const int *dist8)
+{
+    if (g_use_asm && test_any_dup8_avx2_asm)
+        return test_any_dup8_avx2_asm(bs, dist8);
+    return test_any_dup8_avx2(bs, dist8); /* intrinsic fallback */
+}
+
+
 /* Bitset helpers ---------------------------------------------------------*/
 /* Global runtime flag set by main.c */
 bool g_use_simd = false;
+bool g_use_asm  = false;
 
 static inline void set_bit(uint64_t *bs, int idx) { bs[idx >> 6] |= 1ULL << (idx & 63); }
 static inline void clr_bit(uint64_t *bs, int idx) { bs[idx >> 6] &= ~(1ULL << (idx & 63)); }
@@ -85,7 +105,7 @@ bool dfs(int depth, int n, int target_len, int *pos, uint64_t *dist_bs, bool ver
             for (int i = 0; i < depth; ++i) {
                 dist8[idx8++] = next - pos[i];
                 if (idx8 == 8) {
-                    if (test_any_dup8_avx2(dist_bs, dist8)) { ok = false; break; }
+                    if (test_any_dup8(dist_bs, dist8)) { ok = false; break; }
                     idx8 = 0;
                 }
             }
