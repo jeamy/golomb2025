@@ -24,9 +24,13 @@ void run_benchmarks(const char *prog, int n)
         "-d -e",
         "-d -a",
         "-c",
+        "-c -e",
+        "-c -a",
         NULL
     };
 
+        /* ensure all child solver runs inherit OpenMP cancellation */
+    setenv("OMP_CANCELLATION", "TRUE", 1);
     /* ensure output directory exists */
     if (mkdir("out", 0755) == -1 && errno != EEXIST) {
         perror("mkdir out");

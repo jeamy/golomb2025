@@ -208,6 +208,9 @@ extern int test_any_dup8_avx2_gather(const uint64_t *, const int *) __attribute_
 extern int test_any_dup8_avx2_asm(const uint64_t *, const int *) __attribute__((weak));
     g_use_simd = use_simd;
     g_use_asm = use_asm;
+        /* Ensure OpenMP cancellation is enabled unless the user already set it */
+        if (!getenv("OMP_CANCELLATION"))
+            setenv("OMP_CANCELLATION", "TRUE", 1);
         /* Inform user which distance duplicate implementation will be used */
         const char *dup_impl = "scalar (intrinsic)";
         if (g_use_simd && test_any_dup8_avx512)

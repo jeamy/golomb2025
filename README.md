@@ -125,32 +125,36 @@ The solver uses recursive backtracking with pruning:
 | `-mp -a` | 3.81 s |
 | `-c`  | 4.15 s |
 
-#### Order n = 14 (this project, 2025-07-06)
+#### Order n = 14 (bench run 2025-07-06)
 
-| Variant | Flags | Wall Time |
-|---------|-------|-----------|
-| Baseline static + SIMD off | `-mp` | **1 : 49.0** |
-| Unrolled hand-ASM | `-mp -a` | 1 : 51.8 |
-| AVX2 Gather | `-mp -a` (gather) | 1 : 53.8 |
-| Baseline + AVX2 intrinsics | `-mp -e` | 1 : 48.9 |
-| Heuristic start | `-mp -b` | 1 : 47.7 |
-| Creative solver | `-c` | 1 : 50.0 |
-| Dynamic task | `-d` | 38 : 21 |
+| Flags | Time (s) |
+|-------|----------|
+| `-mp` | **119.4** |
+| `-mp -b` | 119.8 |
+| `-mp -e` | 121.6 |
+| `-mp -a` | 115.5 |
+| `-mp -e -a` | 120.8 |
+| `-mp -b -a` | 121.8 |
+| `-c` | 111.9 |
+| `-d` | 2323.8 |
+| `-d -e` | 2337.9 |
+| `-d -a` | 2347.9 |
 
-*(times are h:mm:ss)*
+*(wall-clock seconds)*
 
-The creative solver (`-c`) is competitive but slightly slower than the finely-tuned static solver (`-mp`) for this order.
-
-
+The creative solver (`-c`) is currently the fastest variant, edging out the unrolled hand-ASM static solver (`-mp -a`).
 
 
-All runs used `env OMP_CANCELLATION=TRUE`. For n = 14 the dynamic task solver (`-d`) is roughly **21×** slower than the static solver (`-mp`). AVX2 (`-e`) shows its benefit chiefly for the static solver and for larger orders.
+
+
+All runs used `env OMP_CANCELLATION=TRUE`. For n = 14 the dynamic task solver (`-d`) is roughly **19×** slower than the static solver (`-mp`). The AVX2 path (`-e`) offered no speed-up at this order on the test system.
 
 Take-aways
-* SIMD (`-e`) only shows a marginal ~1 % speed-up at n = 14; benefit scales with deeper search trees (n ≥ 16).
-* Assembler hot-spot (`-a`) slightly regresses runtime (~3 %) at n ≤ 14; its bit-level overhead outweighs saved instructions here.
-* Heuristic start (`-b`) remains the most effective low-hanging fruit (~2 % at n = 14).
-* Dynamic task solver (`-d`) is still ~21× slower despite SIMD/ASM – stick to `-mp` or `-c` for practical work.
+* SIMD flag (`-e`) does not improve runtime at n = 14 on this CPU; the AVX2 implementation is ~2 % slower than baseline.
+* The unrolled hand-coded assembler (`-a`) provides a ~3 % speed-up when combined with the static solver.
+* The creative solver (`-c`) is ~6 % faster than the best static variant and currently the overall winner for n = 14.
+* Heuristic start (`-b`) has negligible impact (<1 %).
+* The dynamic task solver (`-d`) is ~19× slower due to OpenMP task overhead and should be avoided for this order.
 
 ### Option Combinations
 
