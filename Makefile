@@ -5,8 +5,8 @@ PREFIX=bin
 SRCDIR=src
 INCDIR=include
 
-SRC=$(SRCDIR)/main.c $(SRCDIR)/solver.c $(SRCDIR)/lut.c $(SRCDIR)/solver_creative.c $(SRCDIR)/bench.c
-ASM_SRC=$(SRCDIR)/dup_avx2.asm
+SRC=$(SRCDIR)/main.c $(SRCDIR)/solver.c $(SRCDIR)/lut.c $(SRCDIR)/solver_creative.c $(SRCDIR)/bench.c $(SRCDIR)/dup_avx2_gather.c $(SRCDIR)/dup_avx512.c
+ASM_SRC=$(SRCDIR)/dup_avx2_unrolled.asm
 OBJ=$(SRC:.c=.o) $(ASM_SRC:.asm=.o)
 TARGET=$(PREFIX)/golomb
 

@@ -202,8 +202,23 @@ int main(int argc, char **argv)
     ruler_t result;
     extern bool g_use_simd;
     extern bool g_use_asm;
+/* function pointers to detect which impl is linked (weak) */
+extern int test_any_dup8_avx512(const uint64_t *, const int *) __attribute__((weak));
+extern int test_any_dup8_avx2_gather(const uint64_t *, const int *) __attribute__((weak));
+extern int test_any_dup8_avx2_asm(const uint64_t *, const int *) __attribute__((weak));
     g_use_simd = use_simd;
     g_use_asm = use_asm;
+        /* Inform user which distance duplicate implementation will be used */
+        const char *dup_impl = "scalar (intrinsic)";
+        if (g_use_simd && test_any_dup8_avx512)
+            dup_impl = "AVX-512 gather";
+        else if (g_use_simd && test_any_dup8_avx2_gather)
+            dup_impl = "AVX2 gather";
+        else if (g_use_asm && test_any_dup8_avx2_asm)
+            dup_impl = "Unrolled hand-ASM";
+        else if (g_use_simd)
+            dup_impl = "AVX2 intrinsics";
+        printf("[Info] Distance duplicate test implementation: %s\n", dup_impl);
 
     bool solved = false;
     bool compared = false;

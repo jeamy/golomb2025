@@ -6,6 +6,10 @@
 /* Optional hand-written assembler version (FASM). Will be NULL if not linked. */
 extern int test_any_dup8_avx2_asm(const uint64_t *bs, const int *dist8)
         __attribute__((weak));
+extern int test_any_dup8_avx2_gather(const uint64_t *bs, const int *dist8)
+        __attribute__((weak));
+extern int test_any_dup8_avx512(const uint64_t *bs, const int *dist8)
+        __attribute__((weak));
 extern bool g_use_asm;
 
 /* intrinsic fallback prototype */
@@ -16,6 +20,11 @@ static inline int test_any_dup8_avx2(const uint64_t *bs, const int *dist8);
 /* Select best available implementation at runtime */
 static inline int test_any_dup8(const uint64_t *bs, const int *dist8)
 {
+    /* AVX-512 best, then AVX2 gather, then ASM, then intrinsic */
+    if (g_use_simd && test_any_dup8_avx512)
+        return test_any_dup8_avx512(bs, dist8);
+    if (g_use_simd && test_any_dup8_avx2_gather)
+        return test_any_dup8_avx2_gather(bs, dist8);
     if (g_use_asm && test_any_dup8_avx2_asm)
         return test_any_dup8_avx2_asm(bs, dist8);
     return test_any_dup8_avx2(bs, dist8); /* intrinsic fallback */

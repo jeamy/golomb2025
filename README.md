@@ -125,20 +125,19 @@ The solver uses recursive backtracking with pruning:
 | `-mp -a` | 3.81 s |
 | `-c`  | 4.15 s |
 
-#### Order n = 14 (this project)
+#### Order n = 14 (this project, 2025-07-06)
 
-| Flags | Time |
-|-------|------|
-| `-mp` | **109 s** |
-| `-mp -b` | **108 s** |
-| `-mp -e` | 108 s |
-| `-mp -a` | 112 s |
-| `-mp -e -a` | 112 s |
-| `-mp -b -a` | 116 s |
-| `-c` | 110 s |
-| `-d` | 2301 s |
-| `-d -e` | 2321 s |
-| `-d -a` | 2304 s |
+| Variant | Flags | Wall Time |
+|---------|-------|-----------|
+| Baseline static + SIMD off | `-mp` | **1 : 49.0** |
+| Unrolled hand-ASM | `-mp -a` | 1 : 51.8 |
+| AVX2 Gather | `-mp -a` (gather) | 1 : 53.8 |
+| Baseline + AVX2 intrinsics | `-mp -e` | 1 : 48.9 |
+| Heuristic start | `-mp -b` | 1 : 47.7 |
+| Creative solver | `-c` | 1 : 50.0 |
+| Dynamic task | `-d` | 38 : 21 |
+
+*(times are h:mm:ss)*
 
 The creative solver (`-c`) is competitive but slightly slower than the finely-tuned static solver (`-mp`) for this order.
 
