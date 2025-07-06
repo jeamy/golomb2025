@@ -7,7 +7,7 @@
 
 format ELF64
 test_any_dup8_avx2_asm equ test_any_dup8_avx2_unrolled
-public test_any_dup8_avx2_unrolled
+;public test_any_dup8_avx2_unrolled
 public test_any_dup8_avx2_asm
 section '.text' executable
 
