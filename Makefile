@@ -1,5 +1,6 @@
 CC=gcc
 CFLAGS=-Wall -O3 -std=c99 -fopenmp -march=native -flto
+LDFLAGS=-Wl,-z,noexecstack
 PREFIX=bin
 SRCDIR=src
 INCDIR=include
@@ -13,7 +14,7 @@ all: $(TARGET)
 
 $(TARGET): $(OBJ)
 	@mkdir -p $(PREFIX)
-	$(CC) $(CFLAGS) $^ -o $@
+	$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@
 
 %.o: %.c
 	$(CC) $(CFLAGS) -I$(INCDIR) -c $< -o $@

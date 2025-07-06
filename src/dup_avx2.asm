@@ -6,6 +6,8 @@
 ;   rsi = dist8 (pointer to eight int32 distances)
 ; Returns EAX = 1 if ANY duplicate distance already set, 0 otherwise.
 ;
+; Ensure linker marks stack as non-executable to silence GNU ld warning
+
 ; Simple scalar implementation using BT instruction – fast & valid on all x86-64.
 ; (Can be replaced later with AVX2 gather optimisation.)
 

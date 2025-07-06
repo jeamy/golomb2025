@@ -125,6 +125,21 @@ The solver uses recursive backtracking with pruning:
 | `-mp -a` | 3.81 s |
 | `-c`  | 4.15 s |
 
+#### Order n = 14 (this project)
+
+| Flags | Time |
+|-------|------|
+| `-mp` | **109 s** |
+| `-mp -b` | **108 s** |
+| `-mp -e` | 108 s |
+| `-mp -a` | 112 s |
+| `-mp -e -a` | 112 s |
+| `-mp -b -a` | 116 s |
+| `-c` | 110 s |
+| `-d` | 2301 s |
+| `-d -e` | 2321 s |
+| `-d -a` | 2304 s |
+
 The creative solver (`-c`) is competitive but slightly slower than the finely-tuned static solver (`-mp`) for this order.
 
 #### Order n = 14 (original README)
@@ -141,8 +156,10 @@ The creative solver (`-c`) is competitive but slightly slower than the finely-tu
 All runs used `env OMP_CANCELLATION=TRUE`. The dynamic task solver (`-d`) remains roughly **15×** slower (even the mixed `-mp -d` mode) even with SIMD and cancellation. AVX2 (`-e`) shows its benefit chiefly for the static solver and for larger orders.
 
 Take-aways
-* SIMD (`-e`) helps once ≥ 90 distances are tested per node (depth ≥ 16).
-* Assembler hot-spot (`-a`) optimises the distance-duplication test; effect is negligible for n ≤ 13 (<1 %) but expected to grow for larger orders (n ≥ 16).
+* SIMD (`-e`) only shows a marginal ~1 % speed-up at n = 14; benefit scales with deeper search trees (n ≥ 16).
+* Assembler hot-spot (`-a`) slightly regresses runtime (~3 %) at n ≤ 14; its bit-level overhead outweighs saved instructions here.
+* Heuristic start (`-b`) remains the most effective low-hanging fruit (~2 % at n = 14).
+* Dynamic task solver (`-d`) is still ~20× slower despite SIMD/ASM – stick to `-mp` or `-c` for practical work.
 
 ### Option Combinations
 
