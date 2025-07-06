@@ -44,6 +44,8 @@ void run_benchmarks(const char *prog, int n)
 
     for (int i = 0; variants[i]; ++i) {
         const char *v = variants[i];
+        printf("\n>>> Running %s ...\n", v);
+        fflush(stdout);
         char cmd[256];
         snprintf(cmd, sizeof cmd, "%s %d %s", prog, n, v);
 
