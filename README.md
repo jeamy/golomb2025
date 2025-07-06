@@ -141,24 +141,16 @@ The solver uses recursive backtracking with pruning:
 
 The creative solver (`-c`) is competitive but slightly slower than the finely-tuned static solver (`-mp`) for this order.
 
-#### Order n = 14 (original README)
-| Flags | Time |
-|-------|------|
-| `-mp` | **152.9 s** |
-| `-mp -b` | 158.9 s |
-| `-mp -b -e` | 154.0 s |
-| `-d` | 59.0 s |
-| `-d -e` | 59.8 s |
-| `-d -a` | 59.5 s |
-| `-mp -d -e` | 2285 s |
 
-All runs used `env OMP_CANCELLATION=TRUE`. The dynamic task solver (`-d`) remains roughly **15×** slower (even the mixed `-mp -d` mode) even with SIMD and cancellation. AVX2 (`-e`) shows its benefit chiefly for the static solver and for larger orders.
+
+
+All runs used `env OMP_CANCELLATION=TRUE`. For n = 14 the dynamic task solver (`-d`) is roughly **21×** slower than the static solver (`-mp`). AVX2 (`-e`) shows its benefit chiefly for the static solver and for larger orders.
 
 Take-aways
 * SIMD (`-e`) only shows a marginal ~1 % speed-up at n = 14; benefit scales with deeper search trees (n ≥ 16).
 * Assembler hot-spot (`-a`) slightly regresses runtime (~3 %) at n ≤ 14; its bit-level overhead outweighs saved instructions here.
 * Heuristic start (`-b`) remains the most effective low-hanging fruit (~2 % at n = 14).
-* Dynamic task solver (`-d`) is still ~20× slower despite SIMD/ASM – stick to `-mp` or `-c` for practical work.
+* Dynamic task solver (`-d`) is still ~21× slower despite SIMD/ASM – stick to `-mp` or `-c` for practical work.
 
 ### Option Combinations
 
