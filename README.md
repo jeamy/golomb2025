@@ -169,6 +169,23 @@ The solver flags determine the core algorithm used and are mutually exclusive. I
 
 For example, if both `-mp` and `-s` are used, the `-s` flag takes precedence, and the program will run on a single thread.
 
+#### Solver Algorithms Explained
+
+| Flag | Algorithm | Parallelism | Key Idea |
+|------|-----------|-------------|----------|
+| `-s` | Single-threaded baseline | none | Classic depth-first search with pruning; most portable, easiest to debug.
+| `-mp` | Static multi-threaded solver | OpenMP `parallel for` (fixed chunks) | Splits the first decision level evenly among threads once; minimal overhead, excellent cache locality.
+| `-d` | Dynamic task solver | OpenMP tasks (recursive) | Each recursive call can spawn a task; uses `OMP_CANCELLATION` so threads that finish early can cancel siblings once a solution is found. Offers perfect load balancing but high task-management overhead.
+| `-c` | Creative solver | Custom hybrid work-stealing pool | Starts with a static top-level split like `-mp`, then dynamically re-balances deeper nodes via a lock-free work queue. Adaptive granularity heuristics keep the task count low while preventing idle threads.
+
+The `-c` variant was added to bridge the gap between the cheap but rigid `-mp` split and the flexible but heavyweight `-d` tasks. On medium-sized search spaces (e.g. n = 14–16) it often yields the best wall-time.
+
+The following modifier flags can be combined with any solver algorithm (as long as the algorithm itself is selected only once):
+
+* `-e` – enable AVX2 SIMD distance checks when supported.
+* `-a` – use hand-optimised assembly hot-spots (AVX2/AVX-512/Gather dispatch).
+* `-b` – start search from best-known optimal length instead of naive lower bound.
+
 #### Recommended Combinations
 
 -   **For fastest performance:** The static solver (`-mp`) is consistently the fastest option for parallel execution. For larger orders (n ≥ 14), enabling SIMD (`-e`) can provide an additional speed boost.
