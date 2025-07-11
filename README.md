@@ -217,6 +217,25 @@ The entire codebase was programmed through pair-programming with **OpenAI o3**, 
 
 Visit Windsurf: <https://codeium.com/windsurf>
 
-## 7  License
+## 7  Java Implementation
+
+A modern Java implementation of the Golomb ruler search algorithm is available in the `java/` directory. This implementation is a port of the original C version and includes the following features:
+
+- **Java 24 Support**: Uses modern Java features including records, pattern matching, and enhanced APIs
+- **Multi-threaded Search**: Parallel processing with Fork-Join framework (`-mp` flag)
+- **Built-in LUT**: Look-up table with known optimal rulers for verification
+- **Comprehensive Testing**: Full test suite with JUnit 5
+
+To run the Java implementation:
+
+```bash
+cd java
+mvn clean compile
+mvn exec:java -Dexec.args="5 -v -mp"
+```
+
+For more details, see the Java implementation's README in the `java/` directory.
+
+## 8  License
 This repository is released under the MIT License. See the `LICENSE` file for the full text.
 

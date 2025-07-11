@@ -1,0 +1,9 @@
+length=25
+marks=7
+positions=0 2 3 10 16 21 25
+distances=1 2 3 4 5 6 7 8 9 10 11 13 14 15 16 18 19 21 22 23 25
+missing=12 17 20 24
+seconds=0,020000
+time=0,020 s
+options=-mp -b -v
+optimal=yes
