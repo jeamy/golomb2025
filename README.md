@@ -262,6 +262,32 @@ The Go implementation supports the same core command-line options as the C and J
 
 For more details, see the Go implementation's README in the `go/` directory.
 
-## 9  License
+## 9  Ruby Implementation
+
+A Ruby implementation of the Golomb ruler search algorithm is available in the `ruby/` directory. This implementation is a port of the Go and C versions with idiomatic Ruby features:
+
+- **Ruby 2.5+ Support**: Uses modern Ruby features and idioms
+- **Thread-based Parallelism**: Multi-processing search using native Ruby threads (`-mp` flag)
+- **Built-in LUT**: Look-up table with known optimal rulers and optimal lengths
+- **Compatible Output Format**: Produces output files compatible with the C, Java, and Go versions
+
+To build and run the Ruby implementation:
+
+```bash
+cd ruby
+./build.sh      # Makes scripts executable and creates a symlink in ../bin/
+./golomb.rb 5 -v -b -mp
+```
+
+The Ruby implementation supports the same core command-line options as the other versions:
+
+- `-v`: Verbose output
+- `-mp`: Use multi-processing solver with Ruby threads
+- `-b`: Use best-known ruler length as starting point
+- `-o <file>`: Write result to specific output file
+
+For more details, see the Ruby implementation's README in the `ruby/` directory.
+
+## 10  License
 This repository is released under the MIT License. See the `LICENSE` file for the full text.
 
