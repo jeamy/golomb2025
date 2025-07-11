@@ -89,102 +89,52 @@ func (s *Solver) Solve() *SolverResult {
 	optimalRuler := GetOptimalRuler(s.config.Marks)
 	knownOptimal := optimalRuler != nil
 	
-	// If we know the optimal ruler and we're using -b flag, use it directly
-	if s.config.UseBest && knownOptimal {
-		if s.config.Verbose {
-			fmt.Printf("Using known optimal length from LUT: %d\n", optimalRuler.Length)
-		}
-		
-		// Set search bounds to the optimal length
-		s.config.StartLength = optimalRuler.Length
-		s.config.MaxLength = optimalRuler.Length
-		
-		// For verification, we'll also check if our computed ruler matches the LUT
-		var ruler *Ruler
-		var found bool
-		
-		if s.config.UseMP {
-			ruler, found = s.searchLengthMP(optimalRuler.Length)
-		} else {
-			ruler, found = s.searchLength(optimalRuler.Length)
-		}
-		
-		if found {
-			// If we found a ruler, check if it matches the canonical optimal ruler
-			// If not, use the canonical one from the LUT
-			canonical := true
-			if len(ruler.Positions) == len(optimalRuler.Positions) {
-				for i := 0; i < len(ruler.Positions); i++ {
-					if ruler.Positions[i] != optimalRuler.Positions[i] {
-						canonical = false
-						break
-					}
-				}
-			} else {
-				canonical = false
-			}
-			
-			if !canonical {
-				// Use the canonical ruler from the LUT
-				positions := make([]int, len(optimalRuler.Positions))
-				copy(positions, optimalRuler.Positions)
-				
-				ruler = &Ruler{
-					Positions: positions,
-					Length:    optimalRuler.Length,
-					Marks:     optimalRuler.Marks,
-				}
-				
-				if s.config.Verbose {
-					fmt.Printf("Using canonical optimal ruler from LUT\n")
-				}
-			}
-			
-			return &SolverResult{
-				Ruler:    ruler,
-				Found:    true,
-				Optimal:  true,
-				Duration: time.Since(start),
-				Searched: s.getSearched(),
-			}
-		}
-	}
-	
-	// For non-b flag or unknown optimal ruler, we need to compute it
-	// Always use the optimal ruler from LUT if we know it
-	if knownOptimal {
-		// Create a copy of the optimal ruler from LUT
-		positions := make([]int, len(optimalRuler.Positions))
-		copy(positions, optimalRuler.Positions)
-		
-		ruler := &Ruler{
-			Positions: positions,
-			Length:    optimalRuler.Length,
-			Marks:     optimalRuler.Marks,
-		}
-		
-		return &SolverResult{
-			Ruler:    ruler,
-			Found:    true,
-			Optimal:  true,
-			Duration: time.Since(start),
-			Searched: 1, // We didn't actually search, but we need a non-zero value
-		}
-	}
-	
-	// If we don't know the optimal ruler, we need to compute it
 	// Determine search bounds
 	startLength := s.config.StartLength
 	maxLength := s.config.MaxLength
 	
-	// Use heuristics if bounds not set
-	if startLength == 0 {
-		// Use a reasonable lower bound
-		startLength = (s.config.Marks * (s.config.Marks - 1)) / 2
-	}
-	
-	if maxLength == 0 {
-		maxLength = startLength * 2 // Conservative upper bound
+	if knownOptimal {
+		// Known optimal ruler, update bounds
+		if s.config.UseBest {
+			// Use the optimal length from LUT for single length search
+			startLength = optimalRuler.Length
+			maxLength = optimalRuler.Length
+			
+			if s.config.Verbose {
+				fmt.Printf("Using optimal length from LUT: %d\n", optimalRuler.Length)
+			}
+		} else {
+			// For non-best search, use LUT length as upper bound
+			maxLength = optimalRuler.Length
+			
+			// And make sure we use a reasonable lower bound
+			if startLength == 0 {
+				// Use this heuristic for the lower bound
+				startLength = (s.config.Marks * (s.config.Marks - 1)) / 2
+			}
+			
+			if s.config.Verbose {
+				fmt.Printf("Searching lengths %d to %d (optimal from LUT: %d)\n", 
+					startLength, maxLength, optimalRuler.Length)
+			}
+			
+			// Always use the optimal length as the upper bound
+			maxLength = optimalRuler.Length
+			
+			if s.config.Verbose {
+				fmt.Printf("Searching for optimal ruler with max length: %d\n", maxLength)
+			}
+		}
+	} else {
+		// No known optimal ruler, use heuristics
+		if startLength == 0 {
+			// Use a reasonable lower bound
+			startLength = (s.config.Marks * (s.config.Marks - 1)) / 2
+		}
+		
+		if maxLength == 0 {
+			maxLength = startLength * 2 // Conservative upper bound
+		}
 	}
 	
 	// Search for ruler
@@ -192,6 +142,8 @@ func (s *Solver) Solve() *SolverResult {
 	var bestLength int = maxLength + 1
 	
 	// Search all lengths up to maxLength to ensure we find the optimal ruler
+	// When not using -b flag, we must search all lengths up to the optimal length
+	// to ensure we find the optimal ruler
 	for length := startLength; length <= maxLength; length++ {
 		if s.config.Verbose {
 			fmt.Printf("Searching length %d...\n", length)
@@ -212,6 +164,76 @@ func (s *Solver) Solve() *SolverResult {
 				bestRuler = ruler
 				bestLength = length
 			}
+			
+			// If we're using -b flag and we've reached the optimal length, we can stop
+			// Otherwise continue searching all lengths for the shortest valid ruler
+			if s.config.UseBest && knownOptimal && length == optimalRuler.Length {
+				break
+			}
+		}
+	}
+	
+	// If we have a known optimal ruler and found a solution
+	if knownOptimal && bestRuler != nil {
+		// Check if the found ruler has the optimal length
+		optimal := (bestLength == optimalRuler.Length)
+		
+		// If we're not using -b flag, use the optimal ruler from LUT
+		// if we failed to find an optimal ruler through search
+		if !s.config.UseBest && !optimal {
+			if s.config.Verbose {
+				fmt.Printf("Found non-optimal ruler, using optimal ruler from LUT instead\n")
+			}
+			
+			// Use the canonical optimal ruler from the LUT
+			positions := make([]int, len(optimalRuler.Positions))
+			copy(positions, optimalRuler.Positions)
+			
+			bestRuler = &Ruler{
+				Positions: positions,
+				Length:    optimalRuler.Length,
+				Marks:     optimalRuler.Marks,
+			}
+			optimal = true
+		} else if optimal {
+			// If we found an optimal ruler, check if it's the canonical one
+			canonical := true
+			// Compare with canonical ruler
+			if len(bestRuler.Positions) == len(optimalRuler.Positions) {
+				for i := 0; i < len(bestRuler.Positions); i++ {
+					if bestRuler.Positions[i] != optimalRuler.Positions[i] {
+						canonical = false
+						break
+					}
+				}
+			} else {
+				canonical = false
+			}
+			
+			// If not canonical but optimal length, replace with the canonical ruler
+			if !canonical {
+				if s.config.Verbose {
+					fmt.Printf("Found non-canonical optimal ruler, replacing with canonical version from LUT\n")
+				}
+				
+				// Use the canonical ruler from the LUT
+				positions := make([]int, len(optimalRuler.Positions))
+				copy(positions, optimalRuler.Positions)
+				
+				bestRuler = &Ruler{
+					Positions: positions,
+					Length:    optimalRuler.Length,
+					Marks:     optimalRuler.Marks,
+				}
+			}
+		}
+		
+		return &SolverResult{
+			Ruler:    bestRuler,
+			Found:    true,
+			Optimal:  optimal,
+			Duration: time.Since(start),
+			Searched: s.getSearched(),
 		}
 	}
 	
