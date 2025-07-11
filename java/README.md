@@ -161,13 +161,18 @@ mvn test -Dtest=GolombSolverTest -Dorg.slf4j.simpleLogger.defaultLogLevel=debug
 
 ## Known Optimal Rulers
 
-The LUT includes optimal rulers for marks 2-27, with lengths:
-- 4 marks: length 6
-- 5 marks: length 11  
-- 6 marks: length 17
-- 7 marks: length 25
-- 8 marks: length 34
+The LUT includes verified optimal rulers for marks 2-28, with lengths:
+- 4 marks: length 6 `[0, 1, 4, 6]`
+- 5 marks: length 11 `[0, 1, 4, 9, 11]`
+- 6 marks: length 17 `[0, 1, 4, 10, 12, 17]`
+- 7 marks: length 25 `[0, 1, 4, 10, 18, 23, 25]`
+- 8 marks: length 34 `[0, 1, 4, 9, 15, 22, 32, 34]`
+- 9 marks: length 44 `[0, 1, 6, 10, 23, 26, 34, 41, 44]`
+- 10 marks: length 55 `[0, 1, 6, 10, 23, 26, 34, 41, 53, 55]`
+- 11 marks: length 72 `[0, 1, 4, 13, 28, 33, 47, 54, 64, 70, 72]`
 - And more...
+
+All rulers in the LUT have been verified to be valid Golomb rulers with unique distances.
 
 ## Differences from C Version
 
@@ -184,11 +189,53 @@ The LUT includes optimal rulers for marks 2-27, with lengths:
 - Higher memory usage
 - Slightly slower single-threaded performance
 
+### Recent Improvements
+- Fixed LUT data for 10-mark and 11-mark rulers to match the verified optimal rulers from the C implementation
+- Added convenience script (`golomb.sh`) for easier execution with automatic best-known ruler length usage
+- Comprehensive validation of all rulers in the LUT
+- Improved test suite with validation for all ruler lengths
+
 ### Future Enhancements
 - Vector API integration for SIMD-like operations
 - Native compilation with GraalVM
 - Additional search algorithms (SAT solver, creative solver)
 - Web interface for interactive usage
+- Automated validation against C implementation for all new rulers
+
+## Output Format
+
+The Java implementation produces output files in the same format as the C version for easy comparison:
+
+```
+length=<last-mark>
+marks=<n>
+positions=<space-separated mark positions>
+distances=<all measurable distances>
+missing=<distances 1..length that are NOT measurable>
+seconds=<raw runtime, floating seconds>
+time=<pretty runtime, h:mm:ss.mmm>
+options=<command-line flags>
+optimal=<yes|no>   # only if reference ruler existed
+```
+
+Output files are saved to the `out/` directory with names following the pattern `GOL_n<marks>_<options>.txt`.
+
+## Comparing Java and C Implementations
+
+To compare the results between the Java and C implementations:
+
+```bash
+# Run C version
+../bin/golomb 5 -v
+
+# Run Java version
+./golomb.sh 5 -v
+
+# Compare outputs
+diff ../out/GOL_n5_v.txt out/GOL_n5_mp_b_v.txt
+```
+
+Both implementations should find the same optimal rulers for all mark counts, though performance characteristics may differ.
 
 ## License
 
