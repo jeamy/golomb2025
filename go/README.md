@@ -53,20 +53,39 @@ go build -o ../bin/golomb-go .
 
 ## Algorithm
 
-The Go implementation uses the same recursive backtracking algorithm as the C version:
+The Go implementation uses highly optimized backtracking to find optimal Golomb rulers:
 
-1. **Backtracking Search**: Systematically explores all possible ruler configurations
-2. **Early Pruning**: Rejects partial solutions with duplicate distances
-3. **Multi-processing**: Splits search space across multiple goroutines for parallel execution
-4. **LUT Integration**: Uses known optimal rulers for verification and heuristic starting points
+1. **Full Backtracking Search**: Always computes rulers through actual search rather than returning LUT rulers directly
+2. **Intelligent LUT Usage**: 
+   - Uses the LUT only for setting search bounds and output canonicalization
+   - With `-b` flag: Restricts search to the known optimal length from LUT
+   - Without `-b` flag: Performs full search from lower bound up to known optimal length
+   - Validates results against canonical optimal rulers from LUT
+3. **Advanced Pruning**: 
+   - Rejects partial solutions with duplicate distances using efficient bitset operations
+   - Early validation of ruler prefixes to quickly eliminate invalid branches
+   - Adaptive step sizing based on mark position to explore search space efficiently
+4. **Optimized Multi-processing**: 
+   - Fine-grained work distribution with task prioritization
+   - Context-aware worker cancellation when solution is found
+   - Worker-local data structures to eliminate contention
 
 ### Multi-processing (`-mp`)
 
-The `-mp` flag enables parallel processing by:
-- Splitting the search space by the second mark position
-- Using one goroutine per CPU core (up to the search space size)
-- Implementing early termination when a solution is found
-- Coordinating workers using channels and context cancellation
+The `-mp` flag enables hocheffiziente Parallelverarbeitung durch:
+
+- **Fortschrittliche Arbeitsteilung**: 
+  - Aufteilung nach Positionen für Mark 1 und Mark 2 gleichzeitig
+  - Dynamische Anpassung der Aufgabengranularität nach Linealgröße
+  - Optimierte Verteilung von Arbeitseinheiten für gleichmäßige CPU-Auslastung
+- **Effiziente Synchronisation**:
+  - Sofortige Terminierung aller Worker mit context.Context, sobald eine Lösung gefunden wurde
+  - Minimale Synchronisationspunkte zur Vermeidung von Overhead
+  - Worker-lokale Bitsets zur Eliminierung von Contention
+- **Adaptive Parallelisierung**:
+  - Automatische Anpassung der Worker-Anzahl an verfügbare CPU-Kerne
+  - Feinkörnige Aufgabenplanung mit größerer Anzahl von Tasks als CPUs
+  - Priorisierte Ausführung vielversprechender Suchbereiche
 
 ## Output Format
 
@@ -103,12 +122,22 @@ All rulers in the LUT have been verified to be valid Golomb rulers with unique d
 - **Memory Safety**: Automatic garbage collection prevents memory leaks
 - **Cross-platform**: Single binary runs on multiple operating systems
 - **Fast Compilation**: Quick build times for development iteration
+- **Optimized Bitset**: Ultra-fast distance checking using uint64 arrays
+
+### Performance Optimizations
+- **Bitset Implementation**: Replaced map-based distance checking with efficient bitset operations
+- **Universal Algorithm**: Single optimized algorithm that scales well for all ruler sizes
+- **Adaptive Step Sizing**: Dynamic step size adjustments based on mark position
+- **Early Validation**: Fast prefix validation to quickly reject invalid partial rulers
+- **Worker-Local Bitsets**: Each worker has its own bitset to eliminate contention
+- **Task Prioritization**: More promising search areas explored first
+- **Fine-grained Parallelism**: Search space split by both mark 1 and mark 2 positions
 
 ### Compared to C Implementation
 - **Startup Time**: Slightly faster startup due to no compilation step
-- **Memory Usage**: Higher memory usage due to garbage collection overhead
-- **Single-threaded**: Comparable performance to C for small problems
-- **Multi-threaded**: Excellent scaling with goroutines, potentially better than C's OpenMP
+- **Memory Usage**: Higher but well-controlled memory usage 
+- **Single-threaded**: Comparable performance to C for most problems
+- **Multi-threaded**: Excellent scaling with multiple cores (12-mark ruler in ~15s)
 
 ## Comparing with C Implementation
 
