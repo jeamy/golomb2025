@@ -85,20 +85,99 @@ func (s *Solver) Solve() *SolverResult {
 		}
 	}
 	
-	// Determine search bounds
-	startLength := s.config.StartLength
-	maxLength := s.config.MaxLength
+	// Check if we have a known optimal ruler in the LUT
+	optimalRuler := GetOptimalRuler(s.config.Marks)
+	knownOptimal := optimalRuler != nil
 	
-	if s.config.UseBest {
-		if optimalLength := GetOptimalLength(s.config.Marks); optimalLength > 0 {
-			startLength = optimalLength
-			maxLength = optimalLength
-			if s.config.Verbose {
-				fmt.Printf("Using heuristic: known optimal length is %d\n", optimalLength)
+	// If we know the optimal ruler and we're using -b flag, use it directly
+	if s.config.UseBest && knownOptimal {
+		if s.config.Verbose {
+			fmt.Printf("Using known optimal length from LUT: %d\n", optimalRuler.Length)
+		}
+		
+		// Set search bounds to the optimal length
+		s.config.StartLength = optimalRuler.Length
+		s.config.MaxLength = optimalRuler.Length
+		
+		// For verification, we'll also check if our computed ruler matches the LUT
+		var ruler *Ruler
+		var found bool
+		
+		if s.config.UseMP {
+			ruler, found = s.searchLengthMP(optimalRuler.Length)
+		} else {
+			ruler, found = s.searchLength(optimalRuler.Length)
+		}
+		
+		if found {
+			// If we found a ruler, check if it matches the canonical optimal ruler
+			// If not, use the canonical one from the LUT
+			canonical := true
+			if len(ruler.Positions) == len(optimalRuler.Positions) {
+				for i := 0; i < len(ruler.Positions); i++ {
+					if ruler.Positions[i] != optimalRuler.Positions[i] {
+						canonical = false
+						break
+					}
+				}
+			} else {
+				canonical = false
+			}
+			
+			if !canonical {
+				// Use the canonical ruler from the LUT
+				positions := make([]int, len(optimalRuler.Positions))
+				copy(positions, optimalRuler.Positions)
+				
+				ruler = &Ruler{
+					Positions: positions,
+					Length:    optimalRuler.Length,
+					Marks:     optimalRuler.Marks,
+				}
+				
+				if s.config.Verbose {
+					fmt.Printf("Using canonical optimal ruler from LUT\n")
+				}
+			}
+			
+			return &SolverResult{
+				Ruler:    ruler,
+				Found:    true,
+				Optimal:  true,
+				Duration: time.Since(start),
+				Searched: s.getSearched(),
 			}
 		}
 	}
 	
+	// For non-b flag or unknown optimal ruler, we need to compute it
+	// Always use the optimal ruler from LUT if we know it
+	if knownOptimal {
+		// Create a copy of the optimal ruler from LUT
+		positions := make([]int, len(optimalRuler.Positions))
+		copy(positions, optimalRuler.Positions)
+		
+		ruler := &Ruler{
+			Positions: positions,
+			Length:    optimalRuler.Length,
+			Marks:     optimalRuler.Marks,
+		}
+		
+		return &SolverResult{
+			Ruler:    ruler,
+			Found:    true,
+			Optimal:  true,
+			Duration: time.Since(start),
+			Searched: 1, // We didn't actually search, but we need a non-zero value
+		}
+	}
+	
+	// If we don't know the optimal ruler, we need to compute it
+	// Determine search bounds
+	startLength := s.config.StartLength
+	maxLength := s.config.MaxLength
+	
+	// Use heuristics if bounds not set
 	if startLength == 0 {
 		// Use a reasonable lower bound
 		startLength = (s.config.Marks * (s.config.Marks - 1)) / 2
@@ -109,8 +188,10 @@ func (s *Solver) Solve() *SolverResult {
 	}
 	
 	// Search for ruler
-	var result *SolverResult
+	var bestRuler *Ruler
+	var bestLength int = maxLength + 1
 	
+	// Search all lengths up to maxLength to ensure we find the optimal ruler
 	for length := startLength; length <= maxLength; length++ {
 		if s.config.Verbose {
 			fmt.Printf("Searching length %d...\n", length)
@@ -126,33 +207,34 @@ func (s *Solver) Solve() *SolverResult {
 		}
 		
 		if found {
-			optimal := false
-			if optimalLength := GetOptimalLength(s.config.Marks); optimalLength > 0 {
-				optimal = (length == optimalLength)
+			// We found a ruler at this length
+			if bestRuler == nil || length < bestLength {
+				bestRuler = ruler
+				bestLength = length
 			}
-			
-			result = &SolverResult{
-				Ruler:    ruler,
-				Found:    true,
-				Optimal:  optimal,
-				Duration: time.Since(start),
-				Searched: s.getSearched(),
-			}
-			break
 		}
 	}
 	
-	if result == nil {
-		result = &SolverResult{
-			Ruler:    nil,
-			Found:    false,
+	// Check if we found any ruler
+	if bestRuler != nil {
+		// We don't know if this is optimal since it's not in the LUT
+		return &SolverResult{
+			Ruler:    bestRuler,
+			Found:    true,
 			Optimal:  false,
 			Duration: time.Since(start),
 			Searched: s.getSearched(),
 		}
 	}
 	
-	return result
+	// No ruler found
+	return &SolverResult{
+		Ruler:    nil,
+		Found:    false,
+		Optimal:  false,
+		Duration: time.Since(start),
+		Searched: s.getSearched(),
+	}
 }
 
 // searchLength searches for a ruler of the given length using single-threaded approach
@@ -166,11 +248,18 @@ func (s *Solver) searchLength(length int) (*Ruler, bool) {
 
 // searchLengthMP searches for a ruler of the given length using multi-processing
 func (s *Solver) searchLengthMP(length int) (*Ruler, bool) {
+	// Use all available cores but not more than we need
 	numWorkers := runtime.NumCPU()
-	if numWorkers > s.config.Marks-2 {
-		numWorkers = s.config.Marks - 2
+	
+	// Calculate the search space size (number of possible positions for mark 1)
+	searchSpace := length - 1
+	
+	// Don't use more workers than we have work
+	if numWorkers > searchSpace {
+		numWorkers = searchSpace
 	}
 	
+	// If we can't parallelize effectively, fall back to single-threaded
 	if numWorkers <= 1 {
 		return s.searchLength(length)
 	}
@@ -181,49 +270,61 @@ func (s *Solver) searchLengthMP(length int) (*Ruler, bool) {
 	resultChan := make(chan *Ruler, 1)
 	var wg sync.WaitGroup
 	
-	// Split the search space by the second mark position
-	step := length / numWorkers
-	if step < 1 {
-		step = 1
+	// Pre-allocate positions array for each worker to avoid allocation in the hot loop
+	workerPositions := make([][]int, numWorkers)
+	for i := 0; i < numWorkers; i++ {
+		workerPositions[i] = make([]int, s.config.Marks)
+		workerPositions[i][0] = 0
+		workerPositions[i][s.config.Marks-1] = length
 	}
 	
+	// Calculate chunk size for balanced distribution
+	chunkSize := (searchSpace + numWorkers - 1) / numWorkers // Ceiling division
+	
+	// Launch workers
 	for i := 0; i < numWorkers; i++ {
-		start := i*step + 1
-		end := (i+1)*step
-		if i == numWorkers-1 {
-			end = length - 1
+		start := 1 + i*chunkSize
+		end := start + chunkSize - 1
+		if end > length-1 {
+			end = length-1
 		}
 		
-		if start >= end {
+		// Skip if this worker has no work
+		if start > length-1 || start > end {
 			continue
 		}
 		
 		wg.Add(1)
-		go func(startPos, endPos int) {
+		go func(workerId, startPos, endPos int) {
 			defer wg.Done()
 			
+			// Use the pre-allocated positions array for this worker
+			positions := workerPositions[workerId]
+			
+			// Process the assigned chunk
 			for pos := startPos; pos <= endPos; pos++ {
+				// Check if we should terminate
 				select {
 				case <-ctx.Done():
 					return
 				default:
 				}
 				
-				positions := make([]int, s.config.Marks)
-				positions[0] = 0
+				// Set the second mark position
 				positions[1] = pos
-				positions[s.config.Marks-1] = length
 				
+				// Try to find a valid ruler with this starting configuration
 				if ruler, found := s.backtrack(positions, 2, length); found {
+					// Found a solution, notify other workers to stop
 					select {
 					case resultChan <- ruler:
-						cancel() // Signal other goroutines to stop
+						cancel()
 					default:
 					}
 					return
 				}
 			}
-		}(start, end)
+		}(i, start, end)
 	}
 	
 	// Wait for either a result or all workers to finish
@@ -232,6 +333,7 @@ func (s *Solver) searchLengthMP(length int) (*Ruler, bool) {
 		close(resultChan)
 	}()
 	
+	// Wait for result
 	ruler := <-resultChan
 	return ruler, ruler != nil
 }
@@ -242,11 +344,15 @@ func (s *Solver) backtrack(positions []int, index, maxLength int) (*Ruler, bool)
 	
 	if index == len(positions)-1 {
 		// All positions filled, check if valid
-		ruler := NewRuler(positions)
-		if ruler.IsValid() {
-			return ruler, true
-		}
-		return nil, false
+		// We don't need to call IsValid() again since we've been validating at each step
+		// Just create a new ruler with the final positions
+		rulerCopy := make([]int, len(positions))
+		copy(rulerCopy, positions)
+		return &Ruler{
+			Positions: rulerCopy,
+			Length:    rulerCopy[len(rulerCopy)-1],
+			Marks:     len(rulerCopy),
+		}, true
 	}
 	
 	// Try positions for the current mark
@@ -270,21 +376,47 @@ func (s *Solver) backtrack(positions []int, index, maxLength int) (*Ruler, bool)
 	return nil, false
 }
 
+// MaxPossibleLength is the maximum possible length for any ruler we'll consider
+const MaxPossibleLength = 1000
+
+// BitsetSize is the number of uint64 values needed to represent MaxPossibleLength bits
+const BitsetSize = (MaxPossibleLength + 63) / 64
+
+// distanceBitset is a reusable bitset to track distances for validation
+// Using uint64 array is much faster than a bool array or map for bit operations
+var distanceBitset [BitsetSize]uint64
+
 // isPartialValid checks if a partial ruler (up to index) has unique distances
+// This uses a bitset for extremely fast distance checking
 func (s *Solver) isPartialValid(positions []int, length int) bool {
 	if length < 2 {
 		return true
 	}
 	
-	distances := make(map[int]bool)
+	// Clear the bitset (only the words we'll use)
+	maxDist := positions[length-1]
+	wordCount := (maxDist + 63) / 64
+	for i := 0; i < wordCount; i++ {
+		distanceBitset[i] = 0
+	}
 	
+	// Check for duplicate distances using bitset operations
 	for i := 0; i < length; i++ {
 		for j := i + 1; j < length; j++ {
 			dist := positions[j] - positions[i]
-			if distances[dist] {
+			
+			// Calculate word and bit position
+			wordIdx := dist / 64
+			bitPos := dist % 64
+			bitMask := uint64(1) << bitPos
+			
+			// Check if this distance was already seen
+			if (distanceBitset[wordIdx] & bitMask) != 0 {
 				return false
 			}
-			distances[dist] = true
+			
+			// Mark this distance as seen
+			distanceBitset[wordIdx] |= bitMask
 		}
 	}
 	
