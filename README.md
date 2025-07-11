@@ -236,6 +236,32 @@ mvn exec:java -Dexec.args="5 -v -mp"
 
 For more details, see the Java implementation's README in the `java/` directory.
 
-## 8  License
+## 8  Go Implementation
+
+A Go implementation of the Golomb ruler search algorithm is available in the `go/` directory. This implementation is a port of the original C version with idiomatic Go features:
+
+- **Go 1.23 Support**: Uses modern Go features and idioms
+- **Goroutine-based Parallelism**: Multi-processing search using goroutines and contexts (`-mp` flag)
+- **Built-in LUT**: Look-up table with known optimal rulers up to 28 marks
+- **Compatible Output Format**: Produces output files compatible with the C and Java versions
+
+To build and run the Go implementation:
+
+```bash
+cd go
+./build.sh      # Builds the binary and creates a symlink in ../bin/
+./golomb 5 -v -b -mp
+```
+
+The Go implementation supports the same core command-line options as the C and Java versions:
+
+- `-v`: Verbose output
+- `-mp`: Use multi-processing solver with goroutines
+- `-b`: Use best-known ruler length as starting point
+- `-o <file>`: Write result to specific output file
+
+For more details, see the Go implementation's README in the `go/` directory.
+
+## 9  License
 This repository is released under the MIT License. See the `LICENSE` file for the full text.
 

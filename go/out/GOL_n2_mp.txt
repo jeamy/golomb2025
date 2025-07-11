@@ -1,0 +1,9 @@
+length=1
+marks=2
+positions=0 1
+distances=1
+missing=
+seconds=0.000001
+time=0.001 ms
+options=mp
+optimal=yes
