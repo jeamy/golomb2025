@@ -1,4 +1,6 @@
+# Build artifacts
 *.o
 /bin
-/rust/target
-/rust/target/release
+
+# Rust specific
+/rust/target/

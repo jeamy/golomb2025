@@ -1,6 +1,5 @@
 //! Module implementing the Golomb ruler search algorithm
 
-use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use rayon::prelude::*;
 
@@ -36,35 +35,67 @@ pub struct SolverResult {
     pub states_examined: usize,
 }
 
-/// Structure for efficient distance checking
+/// Structure for efficient distance checking using bitsets
 #[derive(Debug, Clone)]
 struct DistanceSet {
-    distances: HashSet<usize>,
+    // Verwenden eines Arrays von u64-Werten als Bitset für effiziente Distanzprüfung
+    // Jedes Bit repräsentiert eine Distanz, wobei 1 = Distanz vorhanden, 0 = nicht vorhanden
+    // Mit 64 Bits pro u64 können wir maximal CHUNK_SIZE * MAX_CHUNKS Distanzen speichern
+    bits: Vec<u64>,
+    max_distance: usize,
 }
+
+// Konstanten für das Bitset
+const CHUNK_SIZE: usize = 64; // 64 Bits pro u64
+const MAX_CHUNKS: usize = 48;  // Unterstützt Distanzen bis zu 64 * 48 = 3072
 
 impl DistanceSet {
     fn new() -> Self {
         Self {
-            distances: HashSet::new(),
+            bits: vec![0; MAX_CHUNKS],
+            max_distance: CHUNK_SIZE * MAX_CHUNKS - 1,
         }
     }
     
+    /// Fügt alle Distanzen zwischen new_pos und jeder Position in positions hinzu
+    /// Gibt false zurück, wenn eine Distanz bereits existiert (Duplikat)
     fn add_distances(&mut self, positions: &[usize], new_pos: usize) -> bool {
         for &pos in positions {
             let dist = new_pos - pos;
-            if !self.distances.insert(dist) {
-                return false; // Duplicate distance found
+            
+            // Sicherheitsüberprüfung für sehr große Distanzen
+            if dist > self.max_distance {
+                continue; // Überspringen von Distanzen, die größer als unser Bitset sind
             }
+            
+            // Berechne den Index und das Bit innerhalb des 64-Bit-Chunks
+            let chunk_index = dist / CHUNK_SIZE;
+            let bit_index = dist % CHUNK_SIZE;
+            let bit_mask = 1u64 << bit_index;
+            
+            // Überprüfe, ob die Distanz bereits existiert
+            if self.bits[chunk_index] & bit_mask != 0 {
+                return false; // Duplikatdistanz gefunden
+            }
+            
+            // Füge die neue Distanz hinzu
+            self.bits[chunk_index] |= bit_mask;
         }
+        
         true
     }
     
-    // fn remove_distances not currently used but kept for potential future expansion
+    // fn remove_distances wird derzeit nicht verwendet, aber für mögliche zukünftige Erweiterungen beibehalten
     // fn remove_distances(&mut self, positions: &[usize], pos_to_remove: usize) {
     //     for &pos in positions {
     //         if pos != pos_to_remove {
     //             let dist = pos_to_remove - pos;
-    //             self.distances.remove(&dist);
+    //             if dist <= self.max_distance {
+    //                 let chunk_index = dist / CHUNK_SIZE;
+    //                 let bit_index = dist % CHUNK_SIZE;
+    //                 let bit_mask = 1u64 << bit_index;
+    //                 self.bits[chunk_index] &= !bit_mask;
+    //             }
     //         }
     //     }
     // }

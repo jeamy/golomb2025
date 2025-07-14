@@ -1,0 +1,10 @@
+length=6
+marks=4
+positions=0 1 4 6
+distances=1 2 3 4 5 6
+missing=
+seconds=0.000662142
+time=0.001 s
+options=mp_b
+optimal=yes
+
