@@ -288,6 +288,32 @@ The Ruby implementation supports the same core command-line options as the other
 
 For more details, see the Ruby implementation's README in the `ruby/` directory.
 
-## 10  License
+## 10  Rust Implementation
+
+A Rust implementation of the Golomb ruler search algorithm is available in the `rust/` directory. This implementation is a port of the previous versions with idiomatic Rust features:
+
+- **Rust 1.70+ Support**: Uses modern Rust features and zero-cost abstractions
+- **Rayon-based Parallelism**: Multi-processing search using Rayon's work-stealing thread pool (`--mp` flag)
+- **Built-in LUT**: Look-up table with known optimal ruler lengths for all marks 1-28
+- **Compatible Output Format**: Produces output files compatible with the C, Java, Go, and Ruby versions
+
+To build and run the Rust implementation:
+
+```bash
+cd rust
+./build.sh      # Builds the binary with cargo and creates a symlink in ../bin/
+./target/release/golomb 5 -v -b --mp
+```
+
+The Rust implementation supports the same core command-line options as the other versions:
+
+- `-v, --verbose`: Verbose output
+- `--mp`: Use multi-processing solver with Rayon
+- `-b, --best`: Use best-known ruler length as search upper bound
+- `-o, --output <file>`: Write result to specific output file
+
+For more details, see the Rust implementation's README in the `rust/` directory.
+
+## 11  License
 This repository is released under the MIT License. See the `LICENSE` file for the full text.
 
