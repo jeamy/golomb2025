@@ -116,7 +116,7 @@ int main(int argc, char **argv)
     pthread_t hb_thread;
     bool use_heuristic_start = false;
     bool use_creative = false;
-    bool use_simd = false; /* -e flag */
+    bool use_simd = false; /* -e flag (forces on); default decided later by HW */
     bool use_asm = false;  /* -a flag */
     char *output_file = NULL;
     bool force_single_thread = false;
@@ -206,17 +206,23 @@ int main(int argc, char **argv)
 extern int test_any_dup8_avx512(const uint64_t *, const int *) __attribute__((weak));
 extern int test_any_dup8_avx2_gather(const uint64_t *, const int *) __attribute__((weak));
 extern int test_any_dup8_avx2_asm(const uint64_t *, const int *) __attribute__((weak));
-    g_use_simd = use_simd;
+    /* Default-enable SIMD if compiled with AVX2/AVX512, or when -e is passed */
     g_use_asm = use_asm;
+#if defined(__AVX512F__) || defined(__AVX2__)
+    g_use_simd = true;
+#else
+    g_use_simd = false;
+#endif
+    if (use_simd) g_use_simd = true;
         /* Ensure OpenMP cancellation is enabled unless the user already set it */
         if (!getenv("OMP_CANCELLATION"))
             setenv("OMP_CANCELLATION", "TRUE", 1);
         /* Inform user which distance duplicate implementation will be used */
         const char *dup_impl = "scalar (intrinsic)";
-        if (g_use_simd && test_any_dup8_avx512)
-            dup_impl = "AVX-512 gather";
-        else if (g_use_simd && test_any_dup8_avx2_gather)
+        if (g_use_simd && test_any_dup8_avx2_gather)
             dup_impl = "AVX2 gather";
+        else if (g_use_simd && test_any_dup8_avx512 && getenv("GOLOMB_USE_AVX512"))
+            dup_impl = "AVX-512 gather";
         else if (g_use_asm && test_any_dup8_avx2_asm)
             dup_impl = "Unrolled hand-ASM";
         else if (g_use_simd)
@@ -227,16 +233,16 @@ extern int test_any_dup8_avx2_asm(const uint64_t *, const int *) __attribute__((
     bool compared = false;
     bool optimal = false;
 
+    int base = n * (n - 1) / 2;
     int target_len_start;
-    if (ref)
-    {
-        target_len_start = ref->length;
-    }
-    else
-    {
-        int base = n * (n - 1) / 2;
-        if (use_heuristic_start && n > 3)
-            base += (n - 3) / 2; /* simple Hasse-style improvement */
+    if (use_heuristic_start) {
+        if (ref) {
+            target_len_start = ref->length;
+        } else {
+            if (n > 3) base += (n - 3) / 2;
+            target_len_start = base;
+        }
+    } else {
         target_len_start = base;
     }
 
@@ -249,7 +255,27 @@ extern int test_any_dup8_avx2_asm(const uint64_t *, const int *) __attribute__((
     g_current_L = target_len_start;
     if (vt_sec > 0.0)
         pthread_create(&hb_thread, NULL, heartbeat_thread, NULL);
-    for (int L = target_len_start; L <= MAX_LEN_BITSET; ++L)
+    /* Pre-check: if LUT exists and -b is NOT used, try the LUT length once */
+    if (ref && !use_heuristic_start)
+    {
+        int L = ref->length;
+        bool ok;
+        if (force_single_thread)
+            ok = solve_golomb(n, L, &result, verbose);
+        else if (use_creative)
+            ok = solve_golomb_creative(n, L, &result, verbose);
+        else if (use_mt_dyn)
+            ok = solve_golomb_mt_dyn(n, L, &result, verbose);
+        else if (use_mp)
+            ok = solve_golomb_mt(n, L, &result, verbose);
+        else
+            ok = solve_golomb(n, L, &result, verbose);
+        if (ok)
+        {
+            solved = true;
+        }
+    }
+    for (int L = target_len_start; !solved && L <= MAX_LEN_BITSET; ++L)
     {
         bool ok;
         if (force_single_thread)
@@ -266,14 +292,7 @@ extern int test_any_dup8_avx2_asm(const uint64_t *, const int *) __attribute__((
         if (ok)
         {
             solved = true;
-            if (use_heuristic_start || ref)
-            {
-                break;
-            }
-            target_len_start = result.length - 1;
-        }
-        if (ref && L >= result.length)
-        {
+            /* Stop at first successful L (we start from best-known or base) */
             break;
         }
     }

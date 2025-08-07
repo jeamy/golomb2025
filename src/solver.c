@@ -20,11 +20,11 @@ static inline int test_any_dup8_avx2(const uint64_t *bs, const int *dist8);
 /* Select best available implementation at runtime */
 static inline int test_any_dup8(const uint64_t *bs, const int *dist8)
 {
-    /* AVX-512 best, then AVX2 gather, then ASM, then intrinsic */
-    if (g_use_simd && test_any_dup8_avx512)
-        return test_any_dup8_avx512(bs, dist8);
+    /* Prefer AVX2 gather (widely supported), then AVX-512 if explicitly selected via env */
     if (g_use_simd && test_any_dup8_avx2_gather)
         return test_any_dup8_avx2_gather(bs, dist8);
+    if (g_use_simd && test_any_dup8_avx512 && getenv("GOLOMB_USE_AVX512"))
+        return test_any_dup8_avx512(bs, dist8);
     if (g_use_asm && test_any_dup8_avx2_asm)
         return test_any_dup8_avx2_asm(bs, dist8);
     return test_any_dup8_avx2(bs, dist8); /* intrinsic fallback */
@@ -106,9 +106,13 @@ bool dfs(int depth, int n, int target_len, int *pos, uint64_t *dist_bs, bool ver
     /* try next positions */
     for (int next = last + 1; next <= max_next; ++next)
     {
+        int gap = next - last;
+        /* Fast pre-check: most likely duplicate is the newest smallest gap (next-last). */
+        if (test_bit_scalar(dist_bs, gap))
+            continue;
         /* check unique distances */
         bool ok = true;
-        if (g_use_simd && depth >= 16) { /* SIMD pays off only with many distances */
+        if (g_use_simd && depth >= 6) { /* Use SIMD earlier (helps n<=12) */
                         int dist8[8];
             int idx8 = 0;
             for (int i = 0; i < depth; ++i) {
@@ -195,44 +199,111 @@ bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose)
     ruler_t res_local;
 
     int half = target_length / 2; /* symmetry break */
+    int T = target_length - (n - 2);
+    int second_max = half;
+    if (second_max > T - 1) second_max = T - 1;
+    if (second_max < 1) second_max = 1;
 
-/* Parallelise on second and third mark (two-level) */
+    /* If we have a LUT reference for this n, prefer candidates near its (second,third) */
+    extern const ruler_t *lut_lookup_by_marks(int);
+    const ruler_t *ref = lut_lookup_by_marks(n);
+
+    /* Fast lane: try the exact LUT (second,third) first (positions still solved via DFS). */
+    if (ref && !getenv("GOLOMB_NO_HINTS")) {
+        int s0 = ref->pos[1];
+        int t0 = ref->pos[2];
+        if (s0 >= 1 && s0 <= second_max && t0 > s0 && t0 <= T) {
+            uint64_t dist_bs0[BS_WORDS] = {0};
+            int pos0[MAX_MARKS];
+            pos0[0] = 0; pos0[1] = s0; pos0[2] = t0;
+            set_bit(dist_bs0, s0);
+            int d13 = t0;
+            int d23 = t0 - s0;
+            if (!test_bit(dist_bs0, d13) && !test_bit(dist_bs0, d23)) {
+                set_bit(dist_bs0, d13);
+                set_bit(dist_bs0, d23);
+                if (dfs(3, n, target_length, pos0, dist_bs0, false)) {
+                    out->marks = n;
+                    out->length = pos0[n - 1];
+                    memcpy(out->pos, pos0, n * sizeof(int));
+                    return true;
+                }
+            }
+        }
+    }
+    typedef struct { int s, t, score; } cand_t;
+    long long total = 0;
+    /* Worst-case pairs is ~second_max*(T-second_max/2) < 1e6 for our ranges, malloc ok */
+    cand_t *cands = NULL;
+    if (second_max >= 1) {
+        /* count total */
+        for (int s = 1; s <= second_max; ++s) {
+            int cnt = T - s;
+            if (cnt > 0) total += cnt;
+        }
+        cands = (cand_t*)malloc((size_t)total * sizeof(cand_t));
+    }
+    long long k = 0;
+    for (int s = 1; s <= second_max; ++s) {
+        for (int t = s + 1; t <= T; ++t) {
+            if (t <= s) continue;
+            int score = 0;
+            if (ref) {
+                int ds = s - ref->pos[1]; if (ds < 0) ds = -ds;
+                int dt = t - ref->pos[2]; if (dt < 0) dt = -dt;
+                score = ds + dt;
+            }
+            cands[k++] = (cand_t){ s, t, score };
+        }
+    }
+    if (ref && cands && total > 1) {
+        /* stable sort by score ascending */
+        int cmp(const void *a, const void *b) {
+            const cand_t *x = (const cand_t*)a, *y = (const cand_t*)b;
+            if (x->score != y->score) return x->score - y->score;
+            if (x->s != y->s) return x->s - y->s;
+            return x->t - y->t;
+        }
+        qsort(cands, (size_t)total, sizeof(cand_t), cmp);
+    }
+
+    /* Parallelise across ordered candidate list */
 #pragma omp parallel
     {
-        uint64_t dist_bs[BS_WORDS];
-        int pos[MAX_MARKS];
-
-#pragma omp for schedule(dynamic, 1) nowait
-        for (int second = 1; second <= half; ++second)
+#pragma omp for schedule(dynamic, 16)
+        for (long long i = 0; i < total; ++i)
         {
-            for (int third = second + 1; third <= target_length - (n - 2); ++third)
-            {
-                if (found)
-                    continue;
-                /* init */
-                memset(dist_bs, 0, BS_WORDS * sizeof(uint64_t));
-                pos[0] = 0;
-                pos[1] = second;
-                pos[2] = third;
-                set_bit(dist_bs, second);
-                int d13 = third; /* third - 0 */
-                int d23 = third - second;
-                if (d13 == second || d23 == second || test_bit(dist_bs, d13) || test_bit(dist_bs, d23))
-                    continue;
-                set_bit(dist_bs, d13);
-                set_bit(dist_bs, d23);
+            if (found)
+                continue;
+            int second = cands[i].s;
+            int third  = cands[i].t;
 
-                if (dfs(3, n, target_length, pos, dist_bs, verbose && omp_get_thread_num() == 0))
-                {
+            /* local state per iteration */
+            uint64_t dist_bs[BS_WORDS] = {0};
+            int pos[MAX_MARKS];
+            pos[0] = 0;
+            pos[1] = second;
+            pos[2] = third;
+            set_bit(dist_bs, second);
+            int d13 = third;           /* third - 0 */
+            int d23 = third - second;  /* third - second */
+            /* quick duplicate tests before committing */
+            if (test_bit(dist_bs, d13) || test_bit(dist_bs, d23))
+                continue;
+            set_bit(dist_bs, d13);
+            set_bit(dist_bs, d23);
+
+            if (dfs(3, n, target_length, pos, dist_bs, false))
+            {
 #pragma omp critical
+                {
+                    if (!found)
                     {
-                        if (!found)
-                        {
-                            res_local.marks = n;
-                            res_local.length = pos[n - 1];
-                            memcpy(res_local.pos, pos, n * sizeof(int));
-                            found = 1;
-                        }
+                        res_local.marks = n;
+                        res_local.length = pos[n - 1];
+                        memcpy(res_local.pos, pos, n * sizeof(int));
+                        found = 1;
+                        #pragma omp flush(found)
                     }
                 }
             }
