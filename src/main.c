@@ -52,6 +52,7 @@ static void print_help(const char *prog_name)
     printf("  -a                 Use hand-written assembler routines.\n");
     printf("  -t                 Run built-in benchmark suite for given <n>.\n");
     printf("  -o <file>          Write the found ruler to a file.\n");
+    printf("  -f <file>          Enable checkpointing (mp solver) and save/resume progress at <file>.\n");
     printf("  --help             Display this help message and exit.\n");
 }
 
@@ -59,6 +60,10 @@ static volatile int g_current_L = -1;
 static volatile int g_done = 0;
 static struct timespec g_ts_start;
 static double g_vt_sec = 0.0;
+
+/* Checkpointing globals (declared in golomb.h) */
+const char *g_cp_path = NULL;
+int g_cp_interval_sec = 60; /* default 60s */
 
 
 static void *heartbeat_thread(void *arg)
@@ -186,6 +191,18 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "-t") == 0)
         {
             run_tests = true;
+        }
+        else if (strcmp(argv[i], "-f") == 0)
+        {
+            if (i + 1 < argc)
+            {
+                g_cp_path = argv[++i];
+            }
+            else
+            {
+                fprintf(stderr, "Error: -f option requires a filename.\n");
+                return EXIT_FAILURE;
+            }
         }
         else
             usage(argv[0]);

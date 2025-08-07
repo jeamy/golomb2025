@@ -2,6 +2,77 @@
 #include <string.h>
 #include <immintrin.h> /* AVX2 intrinsics */
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <errno.h>
+
+/* ---------------- Checkpointing helpers ---------------- */
+typedef struct {
+    char magic[4];      /* "GRCP" */
+    uint32_t version;   /* 1 */
+    uint32_t n;
+    uint32_t L;
+    uint64_t total;
+    uint32_t hint_s;
+    uint32_t hint_t;
+    uint32_t hint_used; /* 0/1 */
+} cp_header_t;
+
+static int cp_load_file(const char *path,
+                        int n,
+                        int target_length,
+                        long long total,
+                        int hint_s,
+                        int hint_t,
+                        int hint_used,
+                        uint32_t *done_words,
+                        size_t words)
+{
+    FILE *fp = fopen(path, "rb");
+    if (!fp) return 0;
+    cp_header_t h;
+    size_t r = fread(&h, 1, sizeof h, fp);
+    if (r != sizeof h || memcmp(h.magic, "GRCP", 4) != 0 || h.version != 1) { fclose(fp); return 0; }
+    if (h.n != (uint32_t)n || h.L != (uint32_t)target_length || h.total != (uint64_t)total) { fclose(fp); return 0; }
+    if (h.hint_s != (uint32_t)hint_s || h.hint_t != (uint32_t)hint_t || h.hint_used != (uint32_t)hint_used) { fclose(fp); return 0; }
+    size_t want = words * sizeof(uint32_t);
+    r = fread(done_words, 1, want, fp);
+    fclose(fp);
+    return r == want;
+}
+
+static int cp_save_file(const char *path,
+                        int n,
+                        int target_length,
+                        long long total,
+                        int hint_s,
+                        int hint_t,
+                        int hint_used,
+                        const uint32_t *done_words,
+                        size_t words)
+{
+    char tmp[1024];
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    FILE *fp = fopen(tmp, "wb");
+    if (!fp) return 0;
+    cp_header_t h;
+    memcpy(h.magic, "GRCP", 4);
+    h.version = 1;
+    h.n = (uint32_t)n;
+    h.L = (uint32_t)target_length;
+    h.total = (uint64_t)total;
+    h.hint_s = (uint32_t)hint_s;
+    h.hint_t = (uint32_t)hint_t;
+    h.hint_used = (uint32_t)hint_used;
+    size_t w1 = fwrite(&h, 1, sizeof h, fp);
+    size_t w2 = fwrite(done_words, 1, words * sizeof(uint32_t), fp);
+    int ok = (w1 == sizeof h) && (w2 == words * sizeof(uint32_t));
+    if (fclose(fp) != 0) ok = 0;
+    if (!ok) { remove(tmp); return 0; }
+    if (rename(tmp, path) != 0) { remove(tmp); return 0; }
+    return 1;
+}
 
 /* Optional hand-written assembler version (FASM). Will be NULL if not linked. */
 extern int test_any_dup8_avx2_asm(const uint64_t *bs, const int *dist8)
@@ -244,11 +315,12 @@ bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose)
         cands = (cand_t*)malloc((size_t)total * sizeof(cand_t));
     }
     long long k = 0;
+    int use_hint_order = (ref && !getenv("GOLOMB_NO_HINTS")) ? 1 : 0;
     for (int s = 1; s <= second_max; ++s) {
         for (int t = s + 1; t <= T; ++t) {
             if (t <= s) continue;
             int score = 0;
-            if (ref) {
+            if (use_hint_order) {
                 int ds = s - ref->pos[1]; if (ds < 0) ds = -ds;
                 int dt = t - ref->pos[2]; if (dt < 0) dt = -dt;
                 score = ds + dt;
@@ -256,7 +328,7 @@ bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose)
             cands[k++] = (cand_t){ s, t, score };
         }
     }
-    if (ref && cands && total > 1) {
+    if (use_hint_order && cands && total > 1) {
         /* stable sort by score ascending */
         int cmp(const void *a, const void *b) {
             const cand_t *x = (const cand_t*)a, *y = (const cand_t*)b;
@@ -267,6 +339,24 @@ bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose)
         qsort(cands, (size_t)total, sizeof(cand_t), cmp);
     }
 
+    /* ---------------- Checkpoint/Resume setup (only for -mp) ---------------- */
+    extern const char *g_cp_path;
+    extern int g_cp_interval_sec;
+    uint32_t *done_words = NULL; /* bitset: 1 = candidate processed */
+    size_t words = (size_t)((total + 31) / 32);
+    if (words == 0) words = 1;
+    done_words = (uint32_t*)calloc(words, sizeof(uint32_t));
+    if (!done_words) { free(cands); return false; }
+
+    int use_cp = (g_cp_path && *g_cp_path) ? 1 : 0;
+    if (use_cp) {
+        int hs = use_hint_order && ref ? ref->pos[1] : 0;
+        int ht = use_hint_order && ref ? ref->pos[2] : 0;
+        (void)cp_load_file(g_cp_path, n, target_length, total, hs, ht, use_hint_order, done_words, words);
+    }
+    int interval = (g_cp_interval_sec > 0) ? g_cp_interval_sec : 60;
+    struct timespec ts_last_flush; clock_gettime(CLOCK_MONOTONIC, &ts_last_flush);
+
     /* Parallelise across ordered candidate list */
 #pragma omp parallel
     {
@@ -275,6 +365,12 @@ bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose)
         {
             if (found)
                 continue;
+            /* skip already processed candidate if resuming */
+            if (use_cp) {
+                size_t wi = (size_t)(i >> 5);
+                uint32_t mask = 1u << (i & 31);
+                if (done_words[wi] & mask) continue;
+            }
             int second = cands[i].s;
             int third  = cands[i].t;
 
@@ -307,13 +403,46 @@ bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose)
                     }
                 }
             }
+
+            /* mark candidate processed and possibly flush checkpoint */
+            if (use_cp) {
+                size_t wi = (size_t)(i >> 5);
+                uint32_t mask = 1u << (i & 31);
+                __sync_fetch_and_or(&done_words[wi], mask);
+                if (omp_get_thread_num() == 0) {
+                    struct timespec ts_now; clock_gettime(CLOCK_MONOTONIC, &ts_now);
+                    time_t dt = ts_now.tv_sec - ts_last_flush.tv_sec;
+                    if (dt >= interval) {
+#pragma omp critical(cp_io)
+                        {
+                            /* re-check inside critical to avoid thundering herd */
+                            struct timespec ts_chk; clock_gettime(CLOCK_MONOTONIC, &ts_chk);
+                            if (ts_chk.tv_sec - ts_last_flush.tv_sec >= interval) {
+                                int hs2 = use_hint_order && ref ? ref->pos[1] : 0;
+                                int ht2 = use_hint_order && ref ? ref->pos[2] : 0;
+                                (void)cp_save_file(g_cp_path, n, target_length, total, hs2, ht2, use_hint_order, done_words, words);
+                                ts_last_flush = ts_chk;
+                            }
+                        }
+                    }
+                }
+            }
         }
+    }
+    if (use_cp) {
+        int hs = use_hint_order && ref ? ref->pos[1] : 0;
+        int ht = use_hint_order && ref ? ref->pos[2] : 0;
+        (void)cp_save_file(g_cp_path, n, target_length, total, hs, ht, use_hint_order, done_words, words);
     }
     if (found)
     {
         *out = res_local;
+        free(cands);
+        free(done_words);
         return true;
     }
+    free(cands);
+    free(done_words);
     return false;
 #else /* !_OPENMP */
     return solve_golomb(n, target_length, out, verbose);

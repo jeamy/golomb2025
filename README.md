@@ -29,6 +29,7 @@ The default flags are `-Wall -O3 -march=native -flto -fopenmp`.  No additional l
 | `-v` | Verbose mode (prints intermediate search states). |
 | `-vt <min>` | Periodic heartbeat every <min> minutes (prints elapsed time and current length). |
 | `-o <file>` | Write result to a specific output file. |
+| `-f <file>` | Enable checkpointing for `-mp` and save/resume progress to/from <file>. |
 | `--help`| Display this help message and exit. |
 
 **Solver Types**
@@ -43,23 +44,32 @@ The default flags are `-Wall -O3 -march=native -flto -fopenmp`.  No additional l
 | Flag | Description |
 |------|-------------|
 | `-b` | Use best-known ruler length as a starting point heuristic. |
-| `-e` | Enable SIMD (AVX2) optimizations where available. |
+| `-e` | Enable SIMD (default if available). |
 | `-a` | Use hand-written assembler hot-spot for distance checking (x86-64 only). |
 | `-t` | Run built-in benchmark suite for the given order and write `out/bench_n<marks>.txt`. |
+Note on SIMD
+- If compiled with AVX2/AVX-512, SIMD is enabled by default. At runtime the program prefers the AVX2 path; AVX-512 is used only when `GOLOMB_USE_AVX512=1` is set.
+- The `-e` flag remains for compatibility and to make the intent explicit; it is not required on AVX2-capable builds.
+
 ### Recommended fastest run
 For most systems the following yields the lowest runtime:
 ```bash
 env OMP_NUM_THREADS=$(nproc) \
     OMP_PLACES=cores OMP_PROC_BIND=close \
-    ./bin/golomb <n> -b -mp -e
+    ./bin/golomb <n> -mp -b
 ```
-- `-b` skips unnecessary length iterations.
-- `-mp` uses a low-overhead static split with good scaling.
-- `-e` enables AVX2 SIMD (~20-25 % speed-up for n ≥ 14).
-Remove `-e` for pre-AVX2 CPUs or very small orders (< 10).
+- `-mp` provides the best scaling with low overhead.
+- `-b` skips unnötige Längen-Iterationen, indem nur die Startlänge aus der LUT genutzt wird. Es werden niemals Positionslisten aus der LUT kopiert.
+- SIMD ist standardmäßig aktiv (falls verfügbar); `-e` kann weggelassen werden.
 
 * The solver writes results to `out/GOL_n<marks>.txt`.  See “Output file format” below.
 * The runtime in seconds is printed after completion.
+
+### Environment variables
+
+- `GOLOMB_USE_AVX512=1` – erzwingt den AVX-512 Gather-Pfad (sonst wird AVX2 bevorzugt, falls verfügbar).
+- `GOLOMB_NO_HINTS=1` – deaktiviert LUT-basierte Heuristiken (kein Fast-Lane-Versuch, keine Sortierung der (second, third)-Paare). Wichtig, wenn ein vorhandenes Checkpoint mit exakt gleicher Kandidatenordnung fortgeführt werden muss.
+- OpenMP: Für reproduzierbares Scheduling ggf. `OMP_NUM_THREADS`, `OMP_PLACES=cores`, `OMP_PROC_BIND=close` setzen.
 
 ### Output file format
 ```
@@ -79,6 +89,30 @@ The same distance and missing lists are echoed to the console after the ruler is
 Example:
 ```bash
 ./bin/golomb 12 -v      # search for optimal 12-mark ruler
+```
+
+### Checkpointing (-f)
+
+The static multi-threaded solver (`-mp`) supports minimal checkpointing to survive long runs or interruptions.
+
+- Enable with `-f <file>`: the solver will persist a bitset of processed top-level candidates (pairs `(second, third)`) to `<file>` approximately every 60 seconds and on exit.
+- Resuming: rerun the exact same command (same `n`, same target length `L` implied by the loop, same solver `-mp`, and same hint ordering setting). The solver will skip already processed candidates and continue.
+- Deterministic ordering: the checkpoint is only valid if the candidate ordering is identical. Therefore, resuming requires that either LUT-based ordering is enabled on both runs, or disabled on both runs. You can force disable hints via `GOLOMB_NO_HINTS=1`.
+- File format: binary header (`"GRCP"`, version, `n`, `L`, total-candidate count, LUT-ref pair and a flag indicating whether hint ordering was used) followed by the bitset payload. The solver validates the header before resuming; mismatches are ignored and a fresh checkpoint is started.
+- Interval: default 60s. The interval can be changed at compile-time or by editing `g_cp_interval_sec` (not exposed via CLI yet).
+
+Beispiele
+
+```bash
+# Langer Lauf mit Checkpoint (mit Hints = Standard)
+./bin/golomb 14 -mp -f out/cp_n14.bin
+
+# Resume (gleiche Flags und identische Umgebung für die Kandidatenordnung)
+./bin/golomb 14 -mp -f out/cp_n14.bin
+
+# Hints explizit abschalten (ordnet Kandidaten rein lexikographisch)
+env GOLOMB_NO_HINTS=1 ./bin/golomb 14 -mp -f out/cp_n14_nohints.bin
+env GOLOMB_NO_HINTS=1 ./bin/golomb 14 -mp -f out/cp_n14_nohints.bin
 ```
 
 
@@ -106,14 +140,22 @@ The solver uses recursive backtracking with pruning:
 3. Use a lower‐bound heuristic: if even by spacing the remaining marks 1 apart the current tentative length cannot be met, prune.
 4. Apply symmetry-breaking: the second mark is limited to ≤ L/2, eliminating mirrored solutions.
 5. Parallelisation
-   - `-mp` – static split: threads fixed on 2nd & 3rd marks.
-   - `-d`  – dynamic tasks: OpenMP tasks from 2nd mark downward for automatic work-stealing.
+   - `-mp` – Parallelisierung über eine geordnete Kandidatenliste der Paare (second, third) mit OpenMP `parallel for` und `schedule(dynamic, 16)`. Falls eine LUT für `n` existiert, werden die Paare nach Nähe zum LUT-Paar `(ref->pos[1], ref->pos[2])` sortiert, sodass vielversprechende Kandidaten zuerst geprüft werden. Frühabbruch über gemeinsames Flag.
+   - `-d`  – dynamic tasks: OpenMP tasks from 2nd mark downward for automatic work-stealing (erfordert `OMP_CANCELLATION=TRUE`).
 
 ● **With LUT entry** – If an optimal length for the requested order exists in the LUT, the solver starts at that length and verifies the result: *Optimal ✅* or *Not optimal ❌*.
 
 ● **Without LUT entry** – If the order is beyond the LUT, the solver incrementally tests longer lengths until a valid ruler is found. No comparison is possible, but runtime is still measured and printed.
 
 ### Sample Runtimes
+
+Update (2025-08-07)
+- `n = 12`, Flags: `-mp` on AVX2 system: **~0.18–0.21 s**
+  ```bash
+  ./bin/golomb 12 -mp
+  # example: 0.186 s, Optimal ✅
+  ```
+Die folgenden Tabellen sind historisch und teilweise vor der -mp-Neuimplementierung entstanden:
 
 #### Order n = 13 (this project)
 
@@ -142,19 +184,18 @@ The solver uses recursive backtracking with pruning:
 
 *(wall-clock seconds)*
 
-The creative solver (`-c`) is currently the fastest variant, edging out the unrolled hand-ASM static solver (`-mp -a`).
+Einordnung: Für kleine Ordnungen (z. B. n = 12) ist `-mp` nach dem Kandidaten-Ordering Update am schnellsten. Für n = 14 war im historischen Lauf der kreative Solver (`-c`) im Vorteil; je nach Hardware kann sich das verschieben.
 
 
 
 
 All runs used `env OMP_CANCELLATION=TRUE`. For n = 14 the dynamic task solver (`-d`) is roughly **19×** slower than the static solver (`-mp`). The AVX2 path (`-e`) offered no speed-up at this order on the test system.
 
-Take-aways
-* SIMD flag (`-e`) does not improve runtime at n = 14 on this CPU; the AVX2 implementation is ~2 % slower than baseline.
-* The unrolled hand-coded assembler (`-a`) provides a ~3 % speed-up when combined with the static solver.
-* The creative solver (`-c`) is ~6 % faster than the best static variant and currently the overall winner for n = 14.
-* Heuristic start (`-b`) has negligible impact (<1 %).
-* The dynamic task solver (`-d`) is ~19× slower due to OpenMP task overhead and should be avoided for this order.
+Take-aways (aktualisiert 2025-08-07)
+* `-mp` ist nach der Kandidaten-Ordering-Änderung für kleine Ordnungen (z. B. n = 12) sehr schnell (≤ 0.25 s auf AVX2).
+* `-b` beeinflusst ausschließlich die Startlänge. Positionen werden immer vom Solver berechnet.
+* SIMD ist standardmäßig aktiv; AVX-512 wird nur via `GOLOMB_USE_AVX512=1` gewählt, sonst AVX2.
+* `-d` bleibt für diese Größenordnung deutlich langsamer (Task-Overhead).
 
 ### Option Combinations
 
@@ -210,6 +251,16 @@ The following modifier flags can be combined with any solver algorithm (as long 
 The flags `-v` (verbose), `-b` (heuristic start), and `-o <file>` (output file) can be combined with any of the above solver configurations.
 * Static split (`-mp`) has the lowest overhead and scales ~linear with cores.
 * Dynamic tasks (`-d`) are only worthwhile with OpenMP 5 cancellation enabled.
+
+### Environment variables
+
+- `GOLOMB_USE_AVX512=1` – Erzwingt die AVX-512-Variante für den Distanz-Duplikat-Test (standardmäßig wird AVX2 bevorzugt).
+- `GOLOMB_NO_HINTS=1` – Deaktiviert die LUT-gestützte Priorisierung der Kandidatenpaare `(second, third)` und den einmaligen Fast-Lane-Versuch mit dem LUT-Paar. Korrektheit bleibt unverändert.
+- `OMP_NUM_THREADS`, `OMP_PLACES`, `OMP_PROC_BIND` – Kontrolle der Thread-Anzahl und Bindung.
+- `OMP_CANCELLATION=TRUE` – empfohlen für den `-d` Solver (nicht erforderlich für `-mp`).
+
+### Semantik von `-b`
+- `-b` nutzt nur die bekannte optimale Länge aus der LUT als Startlänge (Upper Bound). Es findet keinerlei Kopieren von LUT-Positionen statt. Die vollständige Lineal-Lösung wird stets durch die Suche konstruiert und validiert.
 
 ## 6  Development Notes
 This project was developed using **Windsurf**, an advanced AI-powered development environment.  

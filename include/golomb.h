@@ -58,4 +58,10 @@ bool solve_golomb_creative(int n, int target_length, ruler_t *out, bool verbose)
 /* Global runtime flag: 1 => use AVX2 SIMD path where available */
 extern bool g_use_simd;
 
+/* Checkpoint/Resume control (used by -mp solver). If g_cp_path != NULL, the
+ * solver periodically writes progress and can resume from that file. Interval
+ * is in seconds (default 60). */
+extern const char *g_cp_path;
+extern int g_cp_interval_sec;
+
 #endif /* GOLOMB_H */
