@@ -31,7 +31,7 @@ static int cmp_int(const void *a, const void *b) { return (*(const int *)a) - (*
 
 static void usage(const char *prog)
 {
-    fprintf(stderr, "Usage: %s <marks> [-v] [-mp] [-d] [-b] [-e]\n", prog);
+    fprintf(stderr, "Usage: %s <marks> [-v] [-mp] [-d] [-b] [-e] [-fi <sec>]\n", prog);
     fprintf(stderr, "  <marks>  order (number of marks) to search\n");
     fprintf(stderr, "  -v       verbose output\n  -mp      multithreaded solver (static split)\n  -d       dynamic OpenMP task solver\n  -b       better lower-bound start length\n  -e       SIMD-optimised bitset (experimental)\n  -a       Use hand-written assembler routines (experimental)\n  -t       Run built-in benchmark suite for given <marks>\n");
     exit(EXIT_FAILURE);
@@ -53,6 +53,7 @@ static void print_help(const char *prog_name)
     printf("  -t                 Run built-in benchmark suite for given <n>.\n");
     printf("  -o <file>          Write the found ruler to a file.\n");
     printf("  -f <file>          Enable checkpointing (mp solver) and save/resume progress at <file>.\n");
+    printf("  -fi <sec>          Checkpoint flush interval in seconds (default 60).\n");
     printf("  --help             Display this help message and exit.\n");
 }
 
@@ -201,6 +202,19 @@ int main(int argc, char **argv)
             else
             {
                 fprintf(stderr, "Error: -f option requires a filename.\n");
+                return EXIT_FAILURE;
+            }
+        }
+        else if (strcmp(argv[i], "-fi") == 0)
+        {
+            if (i + 1 < argc)
+            {
+                int sec = atoi(argv[++i]);
+                if (sec > 0) g_cp_interval_sec = sec; /* <=0 keeps default 60 via solver */
+            }
+            else
+            {
+                fprintf(stderr, "Error: -fi option requires seconds.\n");
                 return EXIT_FAILURE;
             }
         }

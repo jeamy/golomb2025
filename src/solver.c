@@ -353,6 +353,8 @@ bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose)
         int hs = use_hint_order && ref ? ref->pos[1] : 0;
         int ht = use_hint_order && ref ? ref->pos[2] : 0;
         (void)cp_load_file(g_cp_path, n, target_length, total, hs, ht, use_hint_order, done_words, words);
+        /* Create or refresh the checkpoint file immediately so users can see it early */
+        (void)cp_save_file(g_cp_path, n, target_length, total, hs, ht, use_hint_order, done_words, words);
     }
     int interval = (g_cp_interval_sec > 0) ? g_cp_interval_sec : 60;
     struct timespec ts_last_flush; clock_gettime(CLOCK_MONOTONIC, &ts_last_flush);
@@ -409,20 +411,18 @@ bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose)
                 size_t wi = (size_t)(i >> 5);
                 uint32_t mask = 1u << (i & 31);
                 __sync_fetch_and_or(&done_words[wi], mask);
-                if (omp_get_thread_num() == 0) {
-                    struct timespec ts_now; clock_gettime(CLOCK_MONOTONIC, &ts_now);
-                    time_t dt = ts_now.tv_sec - ts_last_flush.tv_sec;
-                    if (dt >= interval) {
+                struct timespec ts_now; clock_gettime(CLOCK_MONOTONIC, &ts_now);
+                time_t dt = ts_now.tv_sec - ts_last_flush.tv_sec;
+                if (dt >= interval) {
 #pragma omp critical(cp_io)
-                        {
-                            /* re-check inside critical to avoid thundering herd */
-                            struct timespec ts_chk; clock_gettime(CLOCK_MONOTONIC, &ts_chk);
-                            if (ts_chk.tv_sec - ts_last_flush.tv_sec >= interval) {
-                                int hs2 = use_hint_order && ref ? ref->pos[1] : 0;
-                                int ht2 = use_hint_order && ref ? ref->pos[2] : 0;
-                                (void)cp_save_file(g_cp_path, n, target_length, total, hs2, ht2, use_hint_order, done_words, words);
-                                ts_last_flush = ts_chk;
-                            }
+                    {
+                        /* re-check inside critical to avoid thundering herd */
+                        struct timespec ts_chk; clock_gettime(CLOCK_MONOTONIC, &ts_chk);
+                        if (ts_chk.tv_sec - ts_last_flush.tv_sec >= interval) {
+                            int hs2 = use_hint_order && ref ? ref->pos[1] : 0;
+                            int ht2 = use_hint_order && ref ? ref->pos[2] : 0;
+                            (void)cp_save_file(g_cp_path, n, target_length, total, hs2, ht2, use_hint_order, done_words, words);
+                            ts_last_flush = ts_chk;
                         }
                     }
                 }

@@ -30,6 +30,7 @@ The default flags are `-Wall -O3 -march=native -flto -fopenmp`.  No additional l
 | `-vt <min>` | Periodic heartbeat every <min> minutes (prints elapsed time and current length). |
 | `-o <file>` | Write result to a specific output file. |
 | `-f <file>` | Enable checkpointing for `-mp` and save/resume progress to/from <file>. |
+| `-fi <sec>` | Checkpoint flush interval in seconds (default 60). |
 | `--help`| Display this help message and exit. |
 
 **Solver Types**
@@ -68,7 +69,11 @@ env OMP_NUM_THREADS=$(nproc) \
 ### Environment variables
 
 - `GOLOMB_USE_AVX512=1` – erzwingt den AVX-512 Gather-Pfad (sonst wird AVX2 bevorzugt, falls verfügbar).
-- `GOLOMB_NO_HINTS=1` – deaktiviert LUT-basierte Heuristiken (kein Fast-Lane-Versuch, keine Sortierung der (second, third)-Paare). Wichtig, wenn ein vorhandenes Checkpoint mit exakt gleicher Kandidatenordnung fortgeführt werden muss.
+- `GOLOMB_NO_HINTS` – deaktiviert LUT-basierte Heuristiken, sobald die Variable GESETZT ist (unabhängig vom Wert). Das heißt:
+  - Nicht gesetzt: Hints AN (falls eine LUT für `n` existiert).
+  - `GOLOMB_NO_HINTS=1`: Hints AUS.
+  - `GOLOMB_NO_HINTS=0`: Hints ebenfalls AUS (reine Präsenz genügt).
+  Wichtig für Checkpoints: Beim Resume muss die Kandidatenordnung identisch sein – also entweder Hints an beiden Läufen an oder an beiden aus.
 - OpenMP: Für reproduzierbares Scheduling ggf. `OMP_NUM_THREADS`, `OMP_PLACES=cores`, `OMP_PROC_BIND=close` setzen.
 
 ### Output file format
@@ -95,24 +100,26 @@ Example:
 
 The static multi-threaded solver (`-mp`) supports minimal checkpointing to survive long runs or interruptions.
 
-- Enable with `-f <file>`: the solver will persist a bitset of processed top-level candidates (pairs `(second, third)`) to `<file>` approximately every 60 seconds and on exit.
+- Enable with `-f <file>`: the solver will persist a bitset of processed top-level candidates (pairs `(second, third)`) to `<file>` periodically and am Ende eines kompletten Kandidaten-Passes für das aktuelle L.
 - Resuming: rerun the exact same command (same `n`, same target length `L` implied by the loop, same solver `-mp`, and same hint ordering setting). The solver will skip already processed candidates and continue.
 - Deterministic ordering: the checkpoint is only valid if the candidate ordering is identical. Therefore, resuming requires that either LUT-based ordering is enabled on both runs, or disabled on both runs. You can force disable hints via `GOLOMB_NO_HINTS=1`.
 - File format: binary header (`"GRCP"`, version, `n`, `L`, total-candidate count, LUT-ref pair and a flag indicating whether hint ordering was used) followed by the bitset payload. The solver validates the header before resuming; mismatches are ignored and a fresh checkpoint is started.
-- Interval: default 60s. The interval can be changed at compile-time or by editing `g_cp_interval_sec` (not exposed via CLI yet).
+- Interval: default 60s. Override at runtime with `-fi <sec>`.
+- File lifetime: Die Datei wird NICHT automatisch gelöscht. Sie bleibt erhalten (auch bei erfolgreichem Abschluss). Ein erneuter Lauf mit demselben Pfad überschreibt sie.
+- Signals/Abbruch: Es gibt keinen Signal-Handler. Wenn du den Prozess vor einem periodischen Flush beendest (z. B. Ctrl+C bevor `-fi` Sekunden verstrichen sind), wird evtl. KEIN Checkpoint geschrieben. Für schnelle erste Sicherungen `-fi` verkleinern (z. B. `-fi 10`).
 
 Beispiele
 
 ```bash
 # Langer Lauf mit Checkpoint (mit Hints = Standard)
-./bin/golomb 14 -mp -f out/cp_n14.bin
+./bin/golomb 14 -mp -f out/cp_n14.bin -fi 30
 
 # Resume (gleiche Flags und identische Umgebung für die Kandidatenordnung)
-./bin/golomb 14 -mp -f out/cp_n14.bin
+./bin/golomb 14 -mp -f out/cp_n14.bin -fi 30
 
 # Hints explizit abschalten (ordnet Kandidaten rein lexikographisch)
-env GOLOMB_NO_HINTS=1 ./bin/golomb 14 -mp -f out/cp_n14_nohints.bin
-env GOLOMB_NO_HINTS=1 ./bin/golomb 14 -mp -f out/cp_n14_nohints.bin
+env GOLOMB_NO_HINTS=1 ./bin/golomb 14 -mp -f out/cp_n14_nohints.bin -fi 30
+env GOLOMB_NO_HINTS=1 ./bin/golomb 14 -mp -f out/cp_n14_nohints.bin -fi 30
 ```
 
 
