@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -lt 1 ]]; then
+  echo "Usage: $(basename "$0") <checkpoint.bin>" >&2
+  exit 1
+fi
+f="$1"
+if [[ ! -f "$f" ]]; then
+  echo "File not found: $f" >&2
+  exit 1
+fi
+
+# Show first 64 bytes (header) in hex, little-endian bytes
+echo "== Header (first 64 bytes, hex) =="
+od -An -tx1 -N64 "$f"
+
+# Also show file size and payload length
+size=$(stat -c %s "$f" 2>/dev/null || stat -f %z "$f")
+echo "== File size =="
+echo "$size bytes"

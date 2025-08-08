@@ -104,6 +104,20 @@ The static multi-threaded solver (`-mp`) supports minimal checkpointing to survi
 - Resuming: rerun the exact same command (same `n`, same target length `L` implied by the loop, same solver `-mp`, and same hint ordering setting). The solver will skip already processed candidates and continue.
 - Deterministic ordering: the checkpoint is only valid if the candidate ordering is identical. Therefore, resuming requires that either LUT-based ordering is enabled on both runs, or disabled on both runs. You can force disable hints via `GOLOMB_NO_HINTS=1`.
 - File format: binary header (`"GRCP"`, version, `n`, `L`, total-candidate count, LUT-ref pair and a flag indicating whether hint ordering was used) followed by the bitset payload. The solver validates the header before resuming; mismatches are ignored and a fresh checkpoint is started.
+
+  Header-Felder (Little-Endian)
+
+  - __`GRCP`__ (4 Bytes, ASCII): Magic zur Identifikation des Formats.
+  - __`version`__ (`uint32`): Formatversion, aktuell `1`. Andere Versionen werden abgewiesen (neuer Checkpoint wird begonnen).
+  - __`n`__ (`uint32`): Ordnung (Anzahl der Marken).
+  - __`L`__ (`uint32`): Ziel-Länge der aktuellen Runde.
+  - __`total`__ (`uint64`): Anzahl der Top-Level-Kandidatenpaare `(second, third)` für dieses `n`/`L`. Bestimmt die Bitset-Breite. Anzahl Payload-Wörter: `words = ceil(total / 32)`; Payload-Größe in Bytes: `4 * words`.
+  - __`hint_s`__, __`hint_t`__ (je `uint32`): Referenzpaar aus der LUT (`ref->pos[1]`, `ref->pos[2]`) zur Kandidaten-Priorisierung. `0` falls Hints deaktiviert oder keine LUT.
+  - __`hint_used`__ (`uint32`): `0` = Hints AUS, `1` = Hints AN (inkl. Fast-Lane-Versuch). Muss zwischen Lauf und Resume identisch sein.
+
+  Payload (Bitset)
+
+  - Folge von `uint32`-Wörtern (Little-Endian). Bit `i` gesetzt ⇒ Kandidat `i` vollständig abgearbeitet. Nicht gesetzte Bits ⇒ noch offen.
 - Interval: default 60s. Override at runtime with `-fi <sec>`.
 - File lifetime: Die Datei wird NICHT automatisch gelöscht. Sie bleibt erhalten (auch bei erfolgreichem Abschluss). Ein erneuter Lauf mit demselben Pfad überschreibt sie.
 - Signals/Abbruch: Es gibt keinen Signal-Handler. Wenn du den Prozess vor einem periodischen Flush beendest (z. B. Ctrl+C bevor `-fi` Sekunden verstrichen sind), wird evtl. KEIN Checkpoint geschrieben. Für schnelle erste Sicherungen `-fi` verkleinern (z. B. `-fi 10`).
@@ -120,8 +134,23 @@ Beispiele
 # Hints explizit abschalten (ordnet Kandidaten rein lexikographisch)
 env GOLOMB_NO_HINTS=1 ./bin/golomb 14 -mp -f out/cp_n14_nohints.bin -fi 30
 env GOLOMB_NO_HINTS=1 ./bin/golomb 14 -mp -f out/cp_n14_nohints.bin -fi 30
-```
 
+### Checkpoint-Analyse-Skripte (`script/`)
+
+* __`script/cpod`__
+  - Zeigt die Header-Bytes (erste 64 Bytes) des Checkpoints in Hex via `od` und die Dateigröße.
+  - Nutzung:
+    ```bash
+    script/cpod out/cp15_resume.bin
+    ```
+
+* __`script/cppy`__
+  - Python-Parser für den Checkpoint: liest den Header (`GRCP`, version, `n`, `L`, `total`, `hint_s`, `hint_t`, `hint_used`), zählt gesetzte Bits in der Bitset-Payload und gibt den Fortschritt in Prozent aus.
+  - Annahmen: Little-Endian, 40-Byte-Header. Erfordert Python ≥ 3.8.
+  - Nutzung:
+    ```bash
+    script/cppy out/cp15_resume.bin
+    ```
 
 ## 4  Files & Structure
 ```

@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+import sys, os, struct, binascii
+
+def usage():
+    print(f"Usage: {os.path.basename(sys.argv[0])} <checkpoint.bin>", file=sys.stderr)
+    sys.exit(1)
+
+if len(sys.argv) < 2:
+    usage()
+
+path = sys.argv[1]
+if not os.path.isfile(path):
+    print(f"File not found: {path}", file=sys.stderr)
+    sys.exit(2)
+
+with open(path, 'rb') as f:
+    data = f.read()
+
+size = len(data)
+if size < 40:
+    print(f"File too small ({size} bytes)", file=sys.stderr)
+    sys.exit(3)
+
+hdr = data[:40]
+# Unpack first 36 bytes, ignore trailing 4 padding bytes
+magic, version, n, L, total, hint_s, hint_t, hint_used = struct.unpack_from('<4sIIIQIII', hdr, 0)
+if magic != b'GRCP':
+    print(f"Bad magic: {magic}", file=sys.stderr)
+    sys.exit(4)
+
+payload = data[40:]
+words = len(payload) // 4
+if words * 4 != len(payload):
+    print(f"Warning: payload size {len(payload)} not multiple of 4; truncating to {words*4}", file=sys.stderr)
+    payload = payload[:words*4]
+
+# Count set bits across 32-bit words
+set_bits = 0
+for i in range(0, len(payload), 4):
+    (w,) = struct.unpack_from('<I', payload, i)
+    set_bits += w.bit_count()
+
+progress = (set_bits / total * 100.0) if total > 0 else 0.0
+
+print("== Checkpoint Header ==")
+print(f"magic     : {magic.decode()}\nversion   : {version}\nn         : {n}\nL         : {L}\ntotal     : {total}\nhint_s    : {hint_s}\nhint_t    : {hint_t}\nhint_used : {hint_used}")
+print("== Payload ==")
+print(f"file_size     : {size} bytes")
+print(f"header_bytes  : 40")
+print(f"payload_bytes : {len(payload)}")
+print(f"words_32      : {words}")
+print(f"set_bits      : {set_bits}")
+print(f"progress_pct  : {progress:.3f}%")
