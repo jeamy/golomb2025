@@ -1,9 +1,15 @@
 # NVIDIA/CUDA build for golomb_nv
 
-NVCC ?= /usr/local/cuda/bin/nvcc 
+CUDA_HOME ?= /usr/local/cuda
+# Compiler toolkit (headers, nvcc)
+CUDA_TOOLKIT ?= $(CUDA_HOME)
+# Runtime to link/load (libcudart), can differ from toolkit
+CUDA_RUNTIME_HOME ?= $(CUDA_HOME)
+NVCC ?= $(CUDA_TOOLKIT)/bin/nvcc
 CC   ?= gcc
+HOSTCXX ?= g++
 CFLAGS := -O3 -Wall -std=c11 -I../include
-NVFLAGS := -O3 -std=c++17 -Xcompiler "-fopenmp -O3 -Wall" -I../include
+NVFLAGS := -O3 -std=c++17 -Xcompiler "-fopenmp -O3 -Wall" -I../include -gencode arch=compute_75,code=sm_75 -ccbin $(HOSTCXX)
 # Link OpenMP runtime explicitly instead of passing -fopenmp to nvcc
 # (nvcc does not accept -fopenmp as a direct option at link time).
 LDFLAGS := -lgomp -lpthread
@@ -26,7 +32,7 @@ $(BIN_DIR):
 	$(NVCC) $(NVFLAGS) -c -o $@ $<
 
 $(BIN): $(BIN_DIR) $(OBJS_HOST) $(OBJS_CUDA)
-	$(NVCC) $(NVFLAGS) -o $@ $(OBJS_CUDA) $(OBJS_HOST) $(LDFLAGS)
+	$(NVCC) $(NVFLAGS) -o $@ $(OBJS_CUDA) $(OBJS_HOST) -L$(CUDA_RUNTIME_HOME)/lib64 -Xlinker -rpath -Xlinker $(CUDA_RUNTIME_HOME)/lib64 $(LDFLAGS)
 
 clean:
 	rm -f $(OBJS_CUDA) $(OBJS_HOST) $(BIN)

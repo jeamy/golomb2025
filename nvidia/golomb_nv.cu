@@ -372,8 +372,41 @@ int main(int argc, char **argv)
     g_done = 1; if (g_vt_sec > 0.0) pthread_join(hb_th, NULL);
 
     if (found) {
-        // print ruler
-        print_ruler(&res_local);
+        // Print in the same format as the C variant:
+        // length=..\nmarks=..\npositions=..\ndistances=..\nmissing=..
+        int L = res_local.length;
+        int m = res_local.marks;
+        printf("length=%d\nmarks=%d\npositions=", L, m);
+        for (int i = 0; i < m; ++i) {
+            printf("%d%s", res_local.pos[i], (i == m - 1) ? "" : " ");
+        }
+        // Build distance presence 1..L
+        std::vector<unsigned char> present((size_t)L + 1, 0);
+        for (int j = 0; j < m; ++j) {
+            for (int i = 0; i < j; ++i) {
+                int d = res_local.pos[j] - res_local.pos[i];
+                if (d >= 1 && d <= L) present[(size_t)d] = 1;
+            }
+        }
+        // distances line
+        printf("\ndistances=");
+        for (int d = 1, first = 1; d <= L; ++d) {
+            if (present[(size_t)d]) {
+                if (!first) putchar(' ');
+                printf("%d", d);
+                first = 0;
+            }
+        }
+        // missing line
+        printf("\nmissing=");
+        for (int d = 1, first = 1; d <= L; ++d) {
+            if (!present[(size_t)d]) {
+                if (!first) putchar(' ');
+                printf("%d", d);
+                first = 0;
+            }
+        }
+        putchar('\n');
         return 0;
     }
     fprintf(stderr, "No ruler found at L=%d (unexpected for LUT-verified -b).\n", target_length);
