@@ -15,6 +15,9 @@ extern "C" {
 #include "../include/golomb.h"
 }
 
+// Optional hint from LUT to guide DFS next-choice ordering
+static const ruler_t *g_ref_hint = NULL;
+
 /* ---------------- Checkpointing header ---------------- */
 typedef struct {
     char     magic[4];   // "GRCP"
@@ -91,14 +94,41 @@ static bool dfs_scalar(int depth, int n, int target_len, int *pos, uint64_t *dis
 {
     if (depth == n) return pos[n - 1] == target_len;
     int last = pos[depth - 1];
-    if (last + (n - depth) > target_len) return false;
-    int max_next = target_len - (n - depth - 1);
+    // Stronger lower-bound prune: to place the remaining (n - depth) marks,
+    // we need at least a triangular number of additional length.
+    int rem = n - depth; // marks remaining to place, including the final one
+    int tri_needed = (rem * (rem - 1)) / 2; // 1 + 2 + ... + (rem-1)
+    if (last + tri_needed > target_len) return false;
+    // Tighten the max_next bound to preserve headroom for the remaining marks after choosing 'next'
+    int rem_after = rem - 1;
+    int tri_after = (rem_after * (rem_after - 1)) / 2; // minimal extra beyond 'next'
+    int max_next = target_len - tri_after;
     if (depth == 1) {
         int limit = target_len / 2;
         if (limit < last + 1) limit = last + 1;
         if (max_next > limit) max_next = limit;
     }
+    // Try LUT-hinted next position first, if available and valid
+    int hint_val = -1;
+    if (g_ref_hint && depth < g_ref_hint->marks) {
+        hint_val = g_ref_hint->pos[depth];
+    }
+    if (hint_val > last && hint_val <= max_next) {
+        bool ok = true;
+        for (int i = 0; i < depth; ++i) {
+            int d = hint_val - pos[i];
+            if (test_bit64(dist_bs, d)) { ok = false; break; }
+        }
+        if (ok) {
+            pos[depth] = hint_val;
+            for (int i = 0; i < depth; ++i) set_bit64(dist_bs, hint_val - pos[i]);
+            if (verbose && depth < 6) { fprintf(stderr, "depth %d add %d (hint)\n", depth, hint_val); }
+            if (dfs_scalar(depth + 1, n, target_len, pos, dist_bs, verbose)) return true;
+            for (int i = 0; i < depth; ++i) clr_bit64(dist_bs, hint_val - pos[i]);
+        }
+    }
     for (int next = last + 1; next <= max_next; ++next) {
+        if (next == hint_val) continue; // already tried
         bool ok = true;
         for (int i = 0; i < depth; ++i) {
             int d = next - pos[i];
@@ -117,29 +147,70 @@ static bool dfs_scalar(int depth, int n, int target_len, int *pos, uint64_t *dis
 /* ---------------- GPU candidate prefilter ---------------- */
 struct Cand { int s, t, score; };
 
-__global__ void prefilter_kernel(int n, int target_len, const Cand *cands, int64_t total, unsigned char *ok)
+__global__ void prefilter_kernel(int n, int L, const Cand *cands, int64_t total, unsigned char *ok)
 {
     int64_t i = blockIdx.x * 1LL * blockDim.x + threadIdx.x;
     if (i >= total) return;
     int s = cands[i].s;
     int t = cands[i].t;
-    int max_next = target_len - (n - 3 - 1); // depth=3 => max_next = L - (n-4)
-    if (max_next <= t) { ok[i] = 0; return; }
-    // Existing distances: s, t, t-s
-    int ds23 = t - s;
-    unsigned char good = 0;
-    for (int next = t + 1; next <= max_next; ++next) {
-        int d0 = next;           // next - 0
-        int d1 = next - s;       // next - s
-        int d2 = next - t;       // next - t
-        // check against existing distances
-        if (d0 == s || d0 == t || d0 == ds23) continue;
-        if (d1 == s || d1 == t || d1 == ds23) continue;
-        if (d2 == s || d2 == t || d2 == ds23) continue;
-        // also ensure d0, d1, d2 are pairwise distinct (they are, since 0 < s < t < next)
-        good = 1; break;
+    // Depth=3 state: pos[0]=0, pos[1]=s, pos[2]=t
+    int rem = n - 3; // remaining marks including final
+    int tri_needed = rem * (rem - 1) / 2; // minimal additional length needed after 't'
+    if (t + tri_needed > L) { ok[i] = 0; return; }
+
+    // existing distances at depth=3
+    int d_s = s;
+    int d_t = t;
+    int d_st = t - s;
+
+    // First next bound using triangular after-placing bound
+    int rem_after1 = rem - 1;                    // after choosing u
+    int tri_after1 = rem_after1 * (rem_after1 - 1) / 2;
+    int max_u = L - tri_after1;
+    if (max_u <= t) { ok[i] = 0; return; }
+
+    unsigned char ok1 = 0, ok2 = 0;
+    for (int u = t + 1; u <= max_u; ++u) {
+        int du0 = u;       // u - 0
+        int du1 = u - s;   // u - s
+        int du2 = u - t;   // u - t
+        // uniqueness vs existing
+        if (du0 == d_s || du0 == d_t || du0 == d_st) continue;
+        if (du1 == d_s || du1 == d_t || du1 == d_st) continue;
+        if (du2 == d_s || du2 == d_t || du2 == d_st) continue;
+        // pairwise distinct among du0,du1,du2 always true as 0<s<t<u
+        ok1 = 1; // one-step feasible
+
+        // Two-step feasibility: try to place v > u
+        int rem2 = rem_after1 - 1;                 // remaining after placing u
+        int tri_needed2 = rem2 * (rem2 - 1) / 2;   // minimal addl length after v must be <= L - v
+        if (u + tri_needed2 > L) continue;
+        int rem_after2 = rem2 - 1;
+        int tri_after2 = rem_after2 * (rem_after2 - 1) / 2;
+        int max_v = L - tri_after2;
+        if (max_v <= u) continue;
+
+        // Distances present after u:
+        // {d_s, d_t, d_st, du0, du1, du2}
+        for (int v = u + 1; v <= max_v; ++v) {
+            int dv0 = v;       // v - 0
+            int dv1 = v - s;   // v - s
+            int dv2 = v - t;   // v - t
+            int dv3 = v - u;   // v - u
+            // compare to existing set
+            if (dv0 == d_s || dv0 == d_t || dv0 == d_st || dv0 == du0 || dv0 == du1 || dv0 == du2) continue;
+            if (dv1 == d_s || dv1 == d_t || dv1 == d_st || dv1 == du0 || dv1 == du1 || dv1 == du2) continue;
+            if (dv2 == d_s || dv2 == d_t || dv2 == d_st || dv2 == du0 || dv2 == du1 || dv2 == du2) continue;
+            if (dv3 == d_s || dv3 == d_t || dv3 == d_st || dv3 == du0 || dv3 == du1 || dv3 == du2) continue;
+            // pairwise distinct among dv0..dv3; trivial order ensures dv0>dv1>dv2>dv3>0 but check collisions among dv* themselves:
+            if (dv0 == dv1 || dv0 == dv2 || dv0 == dv3) continue;
+            if (dv1 == dv2 || dv1 == dv3) continue;
+            if (dv2 == dv3) continue;
+            ok2 = 2; break;
+        }
+        if (ok2) break;
     }
-    ok[i] = good;
+    ok[i] = ok2 ? ok2 : ok1;
 }
 
 /* ---------------- Heartbeat ---------------- */
@@ -172,12 +243,13 @@ static void *heartbeat_thread(void *)
 int main(int argc, char **argv)
 {
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s <n> [-b] [-v] [-f <file>] [-fi <sec>] [-vt <min>]\n", argv[0]);
+        fprintf(stderr, "Usage: %s <n> [-b] [-v] [-H] [-f <file>] [-fi <sec>] [-vt <min>]\n", argv[0]);
         return 1;
     }
     int n = atoi(argv[1]);
     bool verbose = false;
     bool use_b = false;
+    bool hints = false; // enable LUT hint order and fast-lane only with -H
     const char *cp_path = NULL;
     int cp_interval = 60;
     double vt_min = 0.0;
@@ -185,6 +257,7 @@ int main(int argc, char **argv)
     for (int i = 2; i < argc; ++i) {
         if (strcmp(argv[i], "-v") == 0) verbose = true;
         else if (strcmp(argv[i], "-b") == 0) use_b = true;
+        else if (strcmp(argv[i], "-H") == 0) hints = true;
         else if (strcmp(argv[i], "-f") == 0 && i + 1 < argc) { cp_path = argv[++i]; }
         else if (strcmp(argv[i], "-fi") == 0 && i + 1 < argc) { cp_interval = atoi(argv[++i]); if (cp_interval <= 0) cp_interval = 60; }
         else if (strcmp(argv[i], "-vt") == 0 && i + 1 < argc) { vt_min = atof(argv[++i]); }
@@ -220,7 +293,8 @@ int main(int argc, char **argv)
         int cnt = T - s; if (cnt > 0) total += cnt;
     }
     std::vector<Cand> cands; cands.reserve((size_t)total);
-    int use_hint_order = (ref && getenv("GOLOMB_NO_HINTS") == NULL) ? 1 : 0;
+    int use_hint_order = (hints && ref && getenv("GOLOMB_NO_HINTS") == NULL) ? 1 : 0;
+    g_ref_hint = use_hint_order ? ref : NULL;
     for (int s = 1; s <= second_max; ++s) {
         for (int t = s + 1; t <= T; ++t) {
             int score = 0;
@@ -279,29 +353,34 @@ int main(int argc, char **argv)
         cudaMemcpy(d_cands, cands.data(), sizeof(Cand) * (size_t)total, cudaMemcpyHostToDevice);
         int threads = 256; int blocks = (int)((total + threads - 1) / threads);
         prefilter_kernel<<<blocks, threads>>>(n, target_length, d_cands, total, d_ok);
+        cudaError_t kerr = cudaGetLastError();
+        if (kerr != cudaSuccess) {
+            fprintf(stderr, "[CUDA] prefilter kernel launch error: %s (%d)\n", cudaGetErrorString(kerr), (int)kerr);
+        }
         cudaDeviceSynchronize();
         cudaMemcpy(h_ok, d_ok, (size_t)total, cudaMemcpyDeviceToHost);
-        // Rebuild candidate order: keep original order, but place ok==1 first
+        // Rebuild candidate order: 2-step first, then 1-step, then 0
         {
             std::vector<Cand> reordered; reordered.reserve((size_t)total);
-            size_t ok_cnt = 0;
-            // first pass: ok == 1
+            size_t ok2_cnt = 0, ok1_cnt = 0;
             for (size_t i = 0; i < (size_t)total; ++i) {
-                if (h_ok[i]) { reordered.push_back(cands[i]); ++ok_cnt; }
+                if (h_ok[i] >= 2) { reordered.push_back(cands[i]); ++ok2_cnt; }
             }
-            // second pass: ok == 0
             for (size_t i = 0; i < (size_t)total; ++i) {
-                if (!h_ok[i]) reordered.push_back(cands[i]);
+                if (h_ok[i] == 1) { reordered.push_back(cands[i]); ++ok1_cnt; }
+            }
+            for (size_t i = 0; i < (size_t)total; ++i) {
+                if (h_ok[i] == 0) reordered.push_back(cands[i]);
             }
             cands.swap(reordered);
-            fprintf(stderr, "[CUDA] Prefiltered %lld candidates: %zu pass first check.\n", total, ok_cnt);
+            fprintf(stderr, "[CUDA] Prefiltered %lld candidates: %zu two-step, %zu one-step.\n", total, ok2_cnt, ok1_cnt);
         }
         cudaFree(d_cands); cudaFree(d_ok); free(h_ok);
     }
 
-    // Fast-lane: try exact LUT pair on CPU first if hints enabled
+    // Fast-lane: try exact LUT pair on CPU first only if hints are enabled (-H)
     volatile int found = 0; ruler_t res_local{};
-    if (ref && getenv("GOLOMB_NO_HINTS") == NULL) {
+    if (use_hint_order) {
         int s0 = ref->pos[1], t0 = ref->pos[2];
         if (s0 >= 1 && s0 <= second_max && t0 > s0 && t0 <= T) {
             uint64_t bs[BS_WORDS] = {0};
@@ -320,7 +399,7 @@ int main(int argc, char **argv)
     struct timespec ts_last_flush; clock_gettime(CLOCK_MONOTONIC, &ts_last_flush);
 
     // Parallel CPU search across candidates (static mp), respecting checkpoint
-    #pragma omp parallel for schedule(dynamic, 16)
+    #pragma omp parallel for schedule(guided, 1)
     for (long long i = 0; i < total; ++i) {
         if (found) continue;
         // skip processed

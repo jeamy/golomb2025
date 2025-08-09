@@ -375,6 +375,68 @@ The Rust implementation supports the same core command-line options as the other
 
 For more details, see the Rust implementation's README in the `rust/` directory.
 
+## NVIDIA CUDA Variant (experimental)
+
+This repository contains an optional NVIDIA CUDA implementation in `nvidia/` to accelerate early candidate filtering and guide the CPU search.
+
+### Files
+- `nvidia/golomb_nv.cu` – CUDA/host code.
+- `nvidia/Makefile` – nvcc build rules (targets sm_75 with PTX fallback).
+- `nvidia/build_cuda_nv.sh` – convenience build/run script that also appends metadata to the output file.
+
+### Requirements
+- NVIDIA GPU with Compute Capability 7.5 (e.g. GTX 1660 Ti).
+- CUDA Toolkit 13.0 for compiling, CUDA Runtime 12.9 for loading (matches installed driver).
+- Compilers: `gcc-14`, `g++-14` (used via nvcc `-ccbin`).
+
+Environment variables used by the script (with defaults on this system):
+- `CUDA_TOOLKIT=/usr/local/cuda` (13.0)
+- `CUDA_RUNTIME_HOME=/usr/local/cuda-12.9` (matches driver 12.9)
+- `CC=gcc-14`, `HOSTCXX=g++-14`
+
+The CUDA `Makefile` embeds SASS and PTX to improve forward compatibility:
+```
+-gencode arch=compute_75,code=[sm_75,compute_75]
+```
+
+### Build & Run
+Recommended: use the helper script (writes output to `nvidia/GOL_n<n>_cuda.txt`).
+```bash
+./nvidia/build_cuda_nv.sh 15 -b          # build and run n=15 from LUT length
+./nvidia/build_cuda_nv.sh 16 -b -H       # enable LUT hints/fast-lane
+```
+
+You can also run the binary directly:
+```bash
+nvidia/golomb_nv <n> [-b] [-v] [-H] [-f <cp.bin>] [-fi <sec>] [-vt <min>]
+```
+
+Key options
+- `-b` – use best-known optimal length from LUT as starting length (never copies positions).
+- `-H` – enable LUT-based hinting (candidate ordering) and a one-shot fast-lane attempt with the LUT pair. Hints are DISABLED by default.
+- `-v` – verbose.
+- `-f <file>` / `-fi <sec>` – checkpoint path and flush interval.
+- `-vt <min>` – heartbeat interval (prints to stderr).
+
+Environment variables
+- `GOLOMB_NO_HINTS` – when set, disables LUT hinting even if `-H` is passed. Useful for deterministic resume of checkpoints.
+
+Output & logging
+- Output format in `GOL_n<n>_cuda.txt` matches the C variant: `length`, `marks`, `positions`, `distances`, `missing`, `seconds`, `time`, `options`, and `optimal=yes` when applicable.
+- CUDA diagnostics and heartbeats are printed to stderr with `[CUDA]`/`[VT]` prefixes to keep the output file clean.
+
+Timing note (`-vt`)
+- The heartbeat thread sleeps for `-vt` minutes; on program exit the main thread joins it. This can add up to the sleep duration to the measured `seconds` that the script appends. For realistic timing during benchmarks, omit `-vt`.
+
+GPU prefilter (current status)
+- The CUDA kernel performs a lightweight feasibility check over candidate pairs and prioritises those that pass deeper checks.
+- On some driver/runtime setups (e.g. compiling with Toolkit 13.0 and loading with Runtime 12.9 on Turing, sm_75), a launch error can occur: `device kernel image is invalid (200)`. In this case the program falls back to CPU-only search; correctness is unaffected.
+- The `nvidia/Makefile` now includes PTX fallback (`code=[sm_75,compute_75]`) to mitigate compatibility issues. If you still see the error, ensure the runtime matches the installed driver and that your GPU supports sm_75.
+
+Where results are written
+- Script: `nvidia/GOL_n<n>_cuda.txt` (appends `seconds`, `time`, `options`, `optimal`).
+- Binary (stdout): same core fields as the C variant; diagnostics to stderr.
+
 ## 10  License
 This repository is released under the MIT License. See the `LICENSE` file for the full text.
 
