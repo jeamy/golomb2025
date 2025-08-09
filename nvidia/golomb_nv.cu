@@ -126,8 +126,6 @@ __global__ void prefilter_kernel(int n, int target_len, const Cand *cands, int64
     int max_next = target_len - (n - 3 - 1); // depth=3 => max_next = L - (n-4)
     if (max_next <= t) { ok[i] = 0; return; }
     // Existing distances: s, t, t-s
-    int ds12 = s; (void)ds12;
-    int ds13 = t; (void)ds13;
     int ds23 = t - s;
     unsigned char good = 0;
     for (int next = t + 1; next <= max_next; ++next) {
@@ -253,7 +251,27 @@ int main(int argc, char **argv)
     }
 
     // Optional GPU prefilter: mark candidates that can advance one more mark without immediate duplicates
-    int device_count = 0; cudaGetDeviceCount(&device_count);
+    int device_count = 0;
+    cudaError_t derr = cudaGetDeviceCount(&device_count);
+    int rt_ver = 0, dr_ver = 0; cudaRuntimeGetVersion(&rt_ver); cudaDriverGetVersion(&dr_ver);
+    const char *cvd = getenv("CUDA_VISIBLE_DEVICES");
+    printf("[CUDA] Runtime=%d Driver=%d CUDA_VISIBLE_DEVICES=%s\n", rt_ver, dr_ver, cvd ? cvd : "(unset)");
+    if (derr != cudaSuccess) {
+        printf("[CUDA] cudaGetDeviceCount error: %s (%d)\n", cudaGetErrorString(derr), (int)derr);
+    }
+    if (device_count > 0) {
+        int dev = 0;
+        cudaError_t sderr = cudaSetDevice(dev);
+        if (sderr != cudaSuccess) {
+            printf("[CUDA] cudaSetDevice(%d) failed: %s (%d)\n", dev, cudaGetErrorString(sderr), (int)sderr);
+        }
+        // create context
+        cudaFree(0);
+        cudaDeviceProp prop; cudaGetDeviceProperties(&prop, dev);
+        printf("[CUDA] Using device %d: %s\n", dev, prop.name);
+    } else {
+        printf("[CUDA] No CUDA device found – running CPU-only prefilter.\n");
+    }
     if (device_count > 0 && total > 0) {
         Cand *d_cands = nullptr; unsigned char *d_ok = nullptr; unsigned char *h_ok = (unsigned char*)malloc((size_t)total);
         cudaMalloc(&d_cands, sizeof(Cand) * (size_t)total);
@@ -266,15 +284,17 @@ int main(int argc, char **argv)
         // Rebuild candidate order: keep original order, but place ok==1 first
         {
             std::vector<Cand> reordered; reordered.reserve((size_t)total);
+            size_t ok_cnt = 0;
             // first pass: ok == 1
             for (size_t i = 0; i < (size_t)total; ++i) {
-                if (h_ok[i]) reordered.push_back(cands[i]);
+                if (h_ok[i]) { reordered.push_back(cands[i]); ++ok_cnt; }
             }
             // second pass: ok == 0
             for (size_t i = 0; i < (size_t)total; ++i) {
                 if (!h_ok[i]) reordered.push_back(cands[i]);
             }
             cands.swap(reordered);
+            printf("[CUDA] Prefiltered %lld candidates: %zu pass first check.\n", total, ok_cnt);
         }
         cudaFree(d_cands); cudaFree(d_ok); free(h_ok);
     }
@@ -290,7 +310,7 @@ int main(int argc, char **argv)
             int d13 = t0; int d23 = t0 - s0;
             if (!test_bit64(bs, d13) && !test_bit64(bs, d23)) {
                 set_bit64(bs, d13); set_bit64(bs, d23);
-                if (dfs_scalar(3, n, target_length, pos, bs, false)) {
+                if (dfs_scalar(3, n, target_length, pos, bs, verbose)) {
                     res_local.marks = n; res_local.length = pos[n - 1]; memcpy(res_local.pos, pos, n * sizeof(int)); found = 1;
                 }
             }
@@ -316,7 +336,7 @@ int main(int argc, char **argv)
         int d13 = third; int d23 = third - second;
         if (test_bit64(bs, d13) || test_bit64(bs, d23)) goto mark_done;
         set_bit64(bs, d13); set_bit64(bs, d23);
-        if (dfs_scalar(3, n, target_length, pos, bs, false)) {
+        if (dfs_scalar(3, n, target_length, pos, bs, verbose)) {
             #pragma omp critical
             {
                 if (!found) { res_local.marks = n; res_local.length = pos[n - 1]; memcpy(res_local.pos, pos, n * sizeof(int)); found = 1; }

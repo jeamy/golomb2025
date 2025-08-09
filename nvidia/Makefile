@@ -1,12 +1,14 @@
 # NVIDIA/CUDA build for golomb_nv
 
-NVCC ?= nvcc
+NVCC ?= /usr/local/cuda/bin/nvcc 
 CC   ?= gcc
 CFLAGS := -O3 -Wall -std=c11 -I../include
 NVFLAGS := -O3 -std=c++17 -Xcompiler "-fopenmp -O3 -Wall" -I../include
-LDFLAGS := -fopenmp -lpthread
+# Link OpenMP runtime explicitly instead of passing -fopenmp to nvcc
+# (nvcc does not accept -fopenmp as a direct option at link time).
+LDFLAGS := -lgomp -lpthread
 
-BIN_DIR := ../bin
+BIN_DIR := ./
 BIN := $(BIN_DIR)/golomb_nv
 
 OBJS_HOST := ../src/lut.o
