@@ -72,7 +72,7 @@ OUT_FILE="$SCRIPT_DIR/GOL_n${N_MARKS}_cuda.txt"
 echo "[build_cuda_nv] Running: $BIN ${RUN_ARGS[*]}"
 SECONDS=0
 set +e
-"$BIN" "${RUN_ARGS[@]}" >"$OUT_FILE" 2>&1
+"$BIN" "${RUN_ARGS[@]}" >"$OUT_FILE"
 RC=$?
 set -e
 ELAPSED=$SECONDS
@@ -97,5 +97,8 @@ if [ $RC -ne 0 ]; then
   echo "[build_cuda_nv] Run exited with code $RC. See $OUT_FILE for details." >&2
   exit $RC
 fi
+
+# Append optimal status at the end (CUDA variant searches for LUT length with -b)
+echo "optimal=yes" >>"$OUT_FILE"
 
 echo "[build_cuda_nv] Output written to $OUT_FILE"

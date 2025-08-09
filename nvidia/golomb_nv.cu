@@ -107,7 +107,7 @@ static bool dfs_scalar(int depth, int n, int target_len, int *pos, uint64_t *dis
         if (!ok) continue;
         pos[depth] = next;
         for (int i = 0; i < depth; ++i) set_bit64(dist_bs, next - pos[i]);
-        if (verbose && depth < 6) { printf("depth %d add %d\n", depth, next); }
+        if (verbose && depth < 6) { fprintf(stderr, "depth %d add %d\n", depth, next); }
         if (dfs_scalar(depth + 1, n, target_len, pos, dist_bs, verbose)) return true;
         for (int i = 0; i < depth; ++i) clr_bit64(dist_bs, next - pos[i]);
     }
@@ -158,9 +158,9 @@ static void *heartbeat_thread(void *)
             // format mm:ss.mmm
             int minutes = (int)(since / 60.0);
             double seconds = since - minutes * 60.0;
-            if (minutes > 0) printf("[VT] %02d:%06.3f elapsed – current L=%d\n", minutes, seconds, L);
-            else              printf("[VT] %.3f s elapsed – current L=%d\n", seconds, L);
-            fflush(stdout);
+            if (minutes > 0) fprintf(stderr, "[VT] %02d:%06.3f elapsed – current L=%d\n", minutes, seconds, L);
+            else              fprintf(stderr, "[VT] %.3f s elapsed – current L=%d\n", seconds, L);
+            fflush(stderr);
         }
         struct timespec req = { (time_t)g_vt_sec, (long)((g_vt_sec - (time_t)g_vt_sec) * 1e9) };
         nanosleep(&req, NULL);
@@ -205,7 +205,7 @@ int main(int argc, char **argv)
     clock_gettime(CLOCK_MONOTONIC, &g_ts_start);
     time_t t_start_wall = time(NULL);
     char start_iso[32]; strftime(start_iso, sizeof start_iso, "%F %T", localtime(&t_start_wall));
-    printf("Start time: %s\n", start_iso);
+    fprintf(stderr, "Start time: %s\n", start_iso);
     g_current_L = target_length;
     g_vt_sec = vt_min > 0 ? vt_min * 60.0 : 0.0;
     pthread_t hb_th; if (g_vt_sec > 0.0) pthread_create(&hb_th, NULL, heartbeat_thread, NULL);
@@ -255,22 +255,22 @@ int main(int argc, char **argv)
     cudaError_t derr = cudaGetDeviceCount(&device_count);
     int rt_ver = 0, dr_ver = 0; cudaRuntimeGetVersion(&rt_ver); cudaDriverGetVersion(&dr_ver);
     const char *cvd = getenv("CUDA_VISIBLE_DEVICES");
-    printf("[CUDA] Runtime=%d Driver=%d CUDA_VISIBLE_DEVICES=%s\n", rt_ver, dr_ver, cvd ? cvd : "(unset)");
+    fprintf(stderr, "[CUDA] Runtime=%d Driver=%d CUDA_VISIBLE_DEVICES=%s\n", rt_ver, dr_ver, cvd ? cvd : "(unset)");
     if (derr != cudaSuccess) {
-        printf("[CUDA] cudaGetDeviceCount error: %s (%d)\n", cudaGetErrorString(derr), (int)derr);
+        fprintf(stderr, "[CUDA] cudaGetDeviceCount error: %s (%d)\n", cudaGetErrorString(derr), (int)derr);
     }
     if (device_count > 0) {
         int dev = 0;
         cudaError_t sderr = cudaSetDevice(dev);
         if (sderr != cudaSuccess) {
-            printf("[CUDA] cudaSetDevice(%d) failed: %s (%d)\n", dev, cudaGetErrorString(sderr), (int)sderr);
+            fprintf(stderr, "[CUDA] cudaSetDevice(%d) failed: %s (%d)\n", dev, cudaGetErrorString(sderr), (int)sderr);
         }
         // create context
         cudaFree(0);
         cudaDeviceProp prop; cudaGetDeviceProperties(&prop, dev);
-        printf("[CUDA] Using device %d: %s\n", dev, prop.name);
+        fprintf(stderr, "[CUDA] Using device %d: %s\n", dev, prop.name);
     } else {
-        printf("[CUDA] No CUDA device found – running CPU-only prefilter.\n");
+        fprintf(stderr, "[CUDA] No CUDA device found – running CPU-only prefilter.\n");
     }
     if (device_count > 0 && total > 0) {
         Cand *d_cands = nullptr; unsigned char *d_ok = nullptr; unsigned char *h_ok = (unsigned char*)malloc((size_t)total);
@@ -294,7 +294,7 @@ int main(int argc, char **argv)
                 if (!h_ok[i]) reordered.push_back(cands[i]);
             }
             cands.swap(reordered);
-            printf("[CUDA] Prefiltered %lld candidates: %zu pass first check.\n", total, ok_cnt);
+            fprintf(stderr, "[CUDA] Prefiltered %lld candidates: %zu pass first check.\n", total, ok_cnt);
         }
         cudaFree(d_cands); cudaFree(d_ok); free(h_ok);
     }
