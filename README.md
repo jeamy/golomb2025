@@ -1,3 +1,13 @@
+### Benchmarks (2025-08-10, GTX 1660 Ti)
+
+- CUDA, hints fast-lane: `./nvidia/golomb_nv 14 -b -H` → WALL ≈ 26.86 s
+- CUDA, no hints (tuned): `./nvidia/golomb_nv 14 -b -wu 16384 -dh -dw 24 -ap` → WALL ≈ 193 s
+- CUDA, no hints (tuned): `./nvidia/golomb_nv 14 -b -wu 32768 -dh -dw 32 -ap` → WALL ≈ 191 s
+- CPU baseline, `-mp`: `./bin/golomb 14 -mp -b` → WALL ≈ 119.435 s
+
+Notes
+- The `-H` path skips GPU prefilter entirely (fast-lane first), improving end-to-end time on this machine.
+- After warmup expansion, in-DFS hinting, and async prefilter, the no-hints path is ≈3:11–3:13 and still slower than CPU `-mp` (≈1:59). Further tuning planned.
 # Golomb-2025 – Optimal Golomb Ruler Finder
 
 A small C command-line utility that searches for **optimal Golomb rulers** of a given order (number of marks) and verifies them against a built-in look-up table (LUT).
@@ -383,16 +393,17 @@ This repository contains an optional NVIDIA CUDA implementation in `nvidia/` to 
 - `nvidia/golomb_nv.cu` – CUDA/host code.
 - `nvidia/Makefile` – nvcc build rules (targets sm_75 with PTX fallback).
 - `nvidia/build_cuda_nv.sh` – convenience build/run script that also appends metadata to the output file.
+- `nvidia/build_cuda_12.9nv.sh` – fixed-env wrapper for CUDA 12.9 + GCC/G++ 13.4 (preferred/tested).
 
 ### Requirements
-- NVIDIA GPU with Compute Capability 7.5 (e.g. GTX 1660 Ti).
-- CUDA Toolkit 13.0 for compiling, CUDA Runtime 12.9 for loading (matches installed driver).
-- Compilers: `gcc-14`, `g++-14` (used via nvcc `-ccbin`).
+- NVIDIA GPU with Compute Capability ≥ 7.5 (e.g. GTX 1660 Ti).
+- CUDA Toolkit 12.9 (tested) or 13.0 (fixes C23 math prototype noexcept mismatch).
+- Compilers: GCC/G++ 13.4 with Toolkit 12.9; GCC/G++ 14 are OK with Toolkit 13.0.
 
-Environment variables used by the script (with defaults on this system):
-- `CUDA_TOOLKIT=/usr/local/cuda` (13.0)
-- `CUDA_RUNTIME_HOME=/usr/local/cuda-12.9` (matches driver 12.9)
-- `CC=gcc-14`, `HOSTCXX=g++-14`
+Environment variables used by the scripts:
+- `CUDA_TOOLKIT` – nvcc toolkit root (`/usr/local/cuda-12.9` in the 12.9 wrapper).
+- `CUDA_RUNTIME_HOME` – runtime used for loading (`/usr/local/cuda-12.9`).
+- `CC=gcc-13.4`, `HOSTCXX=g++-13.4` – host compilers (12.9 wrapper).
 
 The CUDA `Makefile` embeds SASS and PTX to improve forward compatibility:
 ```
@@ -408,6 +419,15 @@ Toolchain/Runtime split (important)
   - The `nvidia/Makefile` also sets an rpath to `$(CUDA_RUNTIME_HOME)/lib64`, so the chosen runtime is used at run time without additional `LD_LIBRARY_PATH`.
 
   Further details, troubleshooting, and the CUDA 12.9 header patch instructions are documented in `nvidia/README.md`.
+
+### Recent CUDA changes (2025-08-10)
+
+- Warmup DFS(3) window expanded to a tunable default of 8192 (`-wu`/`GOLOMB_WARMUP`).
+- Main CPU search switched to pure DFS(3) over `(s,t)` (aligned with C `-mp`).
+- OpenMP scheduling set to `schedule(dynamic, 16)` for warmup and main loops.
+- Optional in-DFS hinting at depth 3 (`-dh`) with a tunable window around `u_hint` (`-dw`, default 16).
+- Optional asynchronous GPU prefilter (`-ap`) overlaps GPU scoring with CPU warmup.
+- Fast-lane hints (`-H`) now skip GPU prefilter entirely to preserve fast start.
 
 ### Build & Run
 Recommended: use the helper script (writes output to `nvidia/GOL_n<n>_cuda.txt`).
@@ -457,8 +477,36 @@ Key options
 - `-f <file>` / `-fi <sec>` – checkpoint path and flush interval.
 - `-vt <min>` – heartbeat interval (prints to stderr).
 
+Advanced CUDA CLI flags and tuning (2025-08-10)
+
+- `-wu <N>` or `GOLOMB_WARMUP=<N>`
+  - Warmup window for DFS(3) over `(s,t)`. Default: 8192. Typical: 16384 for n=14.
+- `-dh` or `GOLOMB_DFS3_HINT=1`
+  - Enable in-DFS hinting at depth==3: try `u_hint` first and then a small neighborhood before falling back to plain `dfs(3, ...)`.
+- `-dw <W>` or `GOLOMB_UWIN=<W>`
+  - Half-width of the `u_hint` neighborhood. Default: 16. Try 8–32.
+- `-ap` or `GOLOMB_ASYNC_PREF=1`
+  - Asynchronous GPU prefilter in a background thread, overlapped with CPU warmup. Skipped automatically when `-H` is set.
+
+Examples (CUDA 12.9 wrapper):
+```bash
+# Hints fast-lane (fast start; skips GPU prefilter):
+./nvidia/build_cuda_12.9nv.sh 14 -b -H
+
+# No hints, tuned for earlier hit probability:
+./nvidia/build_cuda_12.9nv.sh 14 -b -wu 16384 -dh -dw 24 -ap
+
+# Same via environment variables:
+GOLOMB_WARMUP=16384 GOLOMB_DFS3_HINT=1 GOLOMB_UWIN=24 GOLOMB_ASYNC_PREF=1 \
+  ./nvidia/build_cuda_12.9nv.sh 14 -b
+```
+
 Environment variables
 - `GOLOMB_NO_HINTS` – when set, disables LUT hinting even if `-H` is passed. Useful for deterministic resume of checkpoints.
+- `GOLOMB_WARMUP` – warmup window size for DFS(3) over `(s,t)`.
+- `GOLOMB_DFS3_HINT` – enable depth-3 in-DFS hinting using `u_hint`.
+- `GOLOMB_UWIN` – half-width of the `u_hint` neighborhood to try first.
+- `GOLOMB_ASYNC_PREF` – run GPU prefilter asynchronously (overlap with warmup).
 
 Output & logging
 - Output format in `GOL_n<n>_cuda.txt` matches the C variant: `length`, `marks`, `positions`, `distances`, `missing`, `seconds`, `time`, `options`, and `optimal=yes` when applicable.

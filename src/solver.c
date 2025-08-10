@@ -19,7 +19,7 @@ typedef struct {
     uint32_t hint_used; /* 0/1 */
 } cp_header_t;
 
-static int cp_load_file(const char *path,
+static __attribute__((unused)) int cp_load_file(const char *path,
                         int n,
                         int target_length,
                         long long total,
@@ -42,7 +42,7 @@ static int cp_load_file(const char *path,
     return r == want;
 }
 
-static int cp_save_file(const char *path,
+static __attribute__((unused)) int cp_save_file(const char *path,
                         int n,
                         int target_length,
                         long long total,

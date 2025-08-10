@@ -1,0 +1,4 @@
+Start time: 2025-08-10 12:05:46
+[CUDA] Runtime=12090 Driver=12090 CUDA_VISIBLE_DEVICES=(unset)
+[CUDA] Using device 0: NVIDIA GeForce GTX 1660 Ti
+[CUDA] Prefiltered 5229 candidates: 2520 two-step, 0 one-step.
