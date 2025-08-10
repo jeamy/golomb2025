@@ -399,12 +399,51 @@ The CUDA `Makefile` embeds SASS and PTX to improve forward compatibility:
 -gencode arch=compute_75,code=[sm_75,compute_75]
 ```
 
+Toolchain/Runtime split (important)
+- The helper script intentionally compiles with Toolkit 13.0 but links/loads with Runtime 12.9 to match the installed driver.
+- It exports these variables and adjusts search paths so they take effect:
+  - `CUDA_TOOLKIT` → prepended to `PATH` for `nvcc`
+  - `CUDA_RUNTIME_HOME` → prepended to `LD_LIBRARY_PATH` for `libcudart.so`
+  - `CC`, `HOSTCXX` → used by `make`/`nvcc -Xcompiler ... -ccbin ...`
+  - The `nvidia/Makefile` also sets an rpath to `$(CUDA_RUNTIME_HOME)/lib64`, so the chosen runtime is used at run time without additional `LD_LIBRARY_PATH`.
+
+  Further details, troubleshooting, and the CUDA 12.9 header patch instructions are documented in `nvidia/README.md`.
+
 ### Build & Run
 Recommended: use the helper script (writes output to `nvidia/GOL_n<n>_cuda.txt`).
 ```bash
 ./nvidia/build_cuda_nv.sh 15 -b          # build and run n=15 from LUT length
 ./nvidia/build_cuda_nv.sh 16 -b -H       # enable LUT hints/fast-lane
 ```
+
+Override examples
+```bash
+# Use a different Toolkit (e.g. compile with 12.9 instead of 13.0)
+CUDA_TOOLKIT=/usr/local/cuda-12.9 ./nvidia/build_cuda_nv.sh 15 -b
+
+# Use a different Runtime (must match your driver)
+CUDA_RUNTIME_HOME=/usr/local/cuda-12.3 ./nvidia/build_cuda_nv.sh 15 -b
+
+# Use different host compilers
+CC=gcc-13 HOSTCXX=g++-13 ./nvidia/build_cuda_nv.sh 15 -b
+```
+
+GCC compatibility for CUDA 12.9
+- With CUDA 12.9 on recent distros, GCC 14 can conflict with glibc C23 math prototypes. Use GCC 13 for a stable build.
+- Install compatibility packages:
+  - Fedora/RHEL/Rocky/OL: `sudo dnf install gcc13 gcc13-c++`
+  - Ubuntu/Debian: `sudo apt update && sudo apt install gcc-13 g++-13`
+  - SUSE/SLES: `sudo zypper install gcc13 gcc13-c++`
+- Build with CUDA 12.9 Toolkit and GCC 13:
+```bash
+CUDA_TOOLKIT=/usr/local/cuda-12.9 CC=gcc-13 HOSTCXX=g++-13 \
+  ./nvidia/build_cuda_nv.sh 16 -b
+```
+Host compiler policy: https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html#host-compiler-support-policy
+
+ Header patch (Option A)
+ - On systems with GCC 13 + glibc 2.41, CUDA 12.9 may fail to compile due to differing exception specifications on `sinpi/cospi/sinpif/cospif`.
+ - The minimal, safe fix is to add `noexcept(true)` to those four declarations in `crt/math_functions.h`. See `nvidia/README.md` for the one-liner `sed` patch and revert instructions.
 
 You can also run the binary directly:
 ```bash
@@ -432,6 +471,10 @@ GPU prefilter (current status)
 - The CUDA kernel performs a lightweight feasibility check over candidate pairs and prioritises those that pass deeper checks.
 - On some driver/runtime setups (e.g. compiling with Toolkit 13.0 and loading with Runtime 12.9 on Turing, sm_75), a launch error can occur: `device kernel image is invalid (200)`. In this case the program falls back to CPU-only search; correctness is unaffected.
 - The `nvidia/Makefile` now includes PTX fallback (`code=[sm_75,compute_75]`) to mitigate compatibility issues. If you still see the error, ensure the runtime matches the installed driver and that your GPU supports sm_75.
+  - Troubleshooting: You may also compile with the same-major Toolkit as your Runtime/driver, e.g.
+    ```bash
+    CUDA_TOOLKIT=/usr/local/cuda-12.9 ./nvidia/build_cuda_nv.sh 16 -b
+    ```
 
 Where results are written
 - Script: `nvidia/GOL_n<n>_cuda.txt` (appends `seconds`, `time`, `options`, `optimal`).

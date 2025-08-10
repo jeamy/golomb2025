@@ -11,12 +11,21 @@ set -euo pipefail
 
 CUDA_TOOLKIT=${CUDA_TOOLKIT:-/usr/local/cuda}
 CUDA_RUNTIME_HOME=${CUDA_RUNTIME_HOME:-/usr/local/cuda-12.9}
+#CUDA_RUNTIME_HOME=/usr/local/cuda-12.9
 CC_BIN=${CC:-gcc-14}
 HOSTCXX_BIN=${HOSTCXX:-g++-14}
+
+# Export and set search paths so nvcc (from Toolkit) and libcudart (from Runtime) are found.
+export CUDA_TOOLKIT CUDA_RUNTIME_HOME
+export CC="$CC_BIN" HOSTCXX="$HOSTCXX_BIN"
+export PATH="${CUDA_TOOLKIT}/bin:${PATH}"
+export LD_LIBRARY_PATH="${CUDA_RUNTIME_HOME}/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 
 echo "[build_cuda_nv] Using CUDA_TOOLKIT=$CUDA_TOOLKIT"
 echo "[build_cuda_nv] Using CUDA_RUNTIME_HOME=$CUDA_RUNTIME_HOME"
 echo "[build_cuda_nv] Using CC=$CC_BIN HOSTCXX=$HOSTCXX_BIN"
+echo "[build_cuda_nv] PATH prepended with $CUDA_TOOLKIT/bin"
+echo "[build_cuda_nv] LD_LIBRARY_PATH prepended with $CUDA_RUNTIME_HOME/lib64"
 
 # Sanity checks
 if ! command -v "$CC_BIN" >/dev/null 2>&1; then

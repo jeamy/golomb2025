@@ -9,7 +9,10 @@ NVCC ?= $(CUDA_TOOLKIT)/bin/nvcc
 CC   ?= gcc
 HOSTCXX ?= g++
 CFLAGS := -O3 -Wall -std=c11 -I../include -march=native -mtune=native
-NVFLAGS := -O3 -std=c++17 -Xcompiler "-fopenmp -O3 -Wall -march=native -mtune=native" -I../include -gencode arch=compute_75,code=[sm_75,compute_75] -ccbin $(HOSTCXX)
+NVFLAGS := -O3 -std=c++17 \
+    -D__GLIBC_USE_ISOC2X=0 -U_ISOC2X_SOURCE -U_ISOC23_SOURCE \
+    -Xcompiler "-fopenmp -O3 -Wall -march=native -mtune=native" \
+    -I../include -gencode arch=compute_75,code=[sm_75,compute_75] -ccbin $(HOSTCXX)
 # Link OpenMP runtime explicitly instead of passing -fopenmp to nvcc
 # (nvcc does not accept -fopenmp as a direct option at link time).
 LDFLAGS := -lgomp -lpthread

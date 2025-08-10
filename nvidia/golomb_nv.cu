@@ -1,9 +1,9 @@
+#include "glibc_c23_math_compat.h"
 #include <cuda_runtime.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstdint>
 #include <cstring>
-#include <cmath>
 #include <ctime>
 #include <pthread.h>
 #include <omp.h>
