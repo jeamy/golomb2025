@@ -359,76 +359,91 @@ bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose)
     int interval = (g_cp_interval_sec > 0) ? g_cp_interval_sec : 60;
     struct timespec ts_last_flush; clock_gettime(CLOCK_MONOTONIC, &ts_last_flush);
 
-    /* Parallelise across ordered candidate list */
+    /* Parallelise across ordered candidate list using a task-based model */
 #pragma omp parallel
     {
-#pragma omp for schedule(dynamic, 16)
-        for (long long i = 0; i < total; ++i)
+#pragma omp single
         {
-            if (found)
-                continue;
-            /* skip already processed candidate if resuming */
-            if (use_cp) {
-                size_t wi = (size_t)(i >> 5);
-                uint32_t mask = 1u << (i & 31);
-                if (done_words[wi] & mask) continue;
-            }
-            int second = cands[i].s;
-            int third  = cands[i].t;
-
-            /* local state per iteration */
-            uint64_t dist_bs[BS_WORDS] = {0};
-            int pos[MAX_MARKS];
-            pos[0] = 0;
-            pos[1] = second;
-            pos[2] = third;
-            set_bit(dist_bs, second);
-            int d13 = third;           /* third - 0 */
-            int d23 = third - second;  /* third - second */
-            /* quick duplicate tests before committing */
-            if (test_bit(dist_bs, d13) || test_bit(dist_bs, d23))
-                continue;
-            set_bit(dist_bs, d13);
-            set_bit(dist_bs, d23);
-
-            if (dfs(3, n, target_length, pos, dist_bs, false))
+#pragma omp taskgroup
             {
-#pragma omp critical
+#pragma omp taskloop grainsize(1)
+                for (long long i = 0; i < total; ++i)
                 {
-                    if (!found)
+                    if (found)
                     {
-                        res_local.marks = n;
-                        res_local.length = pos[n - 1];
-                        memcpy(res_local.pos, pos, n * sizeof(int));
-                        found = 1;
-                        #pragma omp flush(found)
+                        continue;
                     }
-                }
-            }
-
-            /* mark candidate processed and possibly flush checkpoint */
-            if (use_cp) {
-                size_t wi = (size_t)(i >> 5);
-                uint32_t mask = 1u << (i & 31);
-                __sync_fetch_and_or(&done_words[wi], mask);
-                struct timespec ts_now; clock_gettime(CLOCK_MONOTONIC, &ts_now);
-                time_t dt = ts_now.tv_sec - ts_last_flush.tv_sec;
-                if (dt >= interval) {
-#pragma omp critical(cp_io)
+                    /* skip already processed candidate if resuming */
+                    if (use_cp)
                     {
-                        /* re-check inside critical to avoid thundering herd */
-                        struct timespec ts_chk; clock_gettime(CLOCK_MONOTONIC, &ts_chk);
-                        if (ts_chk.tv_sec - ts_last_flush.tv_sec >= interval) {
-                            int hs2 = use_hint_order && ref ? ref->pos[1] : 0;
-                            int ht2 = use_hint_order && ref ? ref->pos[2] : 0;
-                            (void)cp_save_file(g_cp_path, n, target_length, total, hs2, ht2, use_hint_order, done_words, words);
-                            ts_last_flush = ts_chk;
+                        size_t wi = (size_t)(i >> 5);
+                        uint32_t mask = 1u << (i & 31);
+                        if (done_words[wi] & mask)
+                            continue;
+                    }
+                    int second = cands[i].s;
+                    int third = cands[i].t;
+                    /* local state per iteration */
+                    uint64_t dist_bs[BS_WORDS] = {0};
+                    int pos[MAX_MARKS];
+                    pos[0] = 0;
+                    pos[1] = second;
+                    pos[2] = third;
+                    set_bit(dist_bs, second);
+                    int d13 = third;          /* third - 0 */
+                    int d23 = third - second; /* third - second */
+                    /* quick duplicate tests before committing */
+                    if (test_bit(dist_bs, d13) || test_bit(dist_bs, d23))
+                        continue;
+                    set_bit(dist_bs, d13);
+                    set_bit(dist_bs, d23);
+
+                    if (dfs(3, n, target_length, pos, dist_bs, false))
+                    {
+                        int old_found;
+#pragma omp atomic capture
+                        {
+                            old_found = found;
+                            found = 1;
+                        }
+                        if (old_found == 0)
+                        {
+                            res_local.marks = n;
+                            res_local.length = pos[n - 1];
+                            memcpy(res_local.pos, pos, n * sizeof(int));
+#pragma omp cancel taskgroup
+                        }
+                    }
+                    /* mark candidate processed and possibly flush checkpoint */
+                    if (use_cp)
+                    {
+                        size_t wi = (size_t)(i >> 5);
+                        uint32_t mask = 1u << (i & 31);
+                        __sync_fetch_and_or(&done_words[wi], mask);
+                        struct timespec ts_now;
+                        clock_gettime(CLOCK_MONOTONIC, &ts_now);
+                        time_t dt = ts_now.tv_sec - ts_last_flush.tv_sec;
+                        if (dt >= interval)
+                        {
+#pragma omp critical(cp_io)
+                            {
+                                /* re-check inside critical to avoid thundering herd */
+                                struct timespec ts_chk;
+                                clock_gettime(CLOCK_MONOTONIC, &ts_chk);
+                                if (ts_chk.tv_sec - ts_last_flush.tv_sec >= interval)
+                                {
+                                    int hs2 = use_hint_order && ref ? ref->pos[1] : 0;
+                                    int ht2 = use_hint_order && ref ? ref->pos[2] : 0;
+                                    (void)cp_save_file(g_cp_path, n, target_length, total, hs2, ht2, use_hint_order, done_words, words);
+                                    ts_last_flush = ts_chk;
+                                }
+                            }
                         }
                     }
                 }
-            }
-        }
-    }
+            } /* end taskgroup */
+        }     /* end single */
+    }         /* end parallel */
     if (use_cp) {
         int hs = use_hint_order && ref ? ref->pos[1] : 0;
         int ht = use_hint_order && ref ? ref->pos[2] : 0;
