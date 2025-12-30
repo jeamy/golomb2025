@@ -1,18 +1,16 @@
-; Unrolled distance duplicate test (8 distances, no loop) - FASM version
-; int test_any_dup8_avx2_asm(const uint64_t *bs, const int *dist8);
+; Unrolled distance duplicate test (8 distances) - NASM version
+; int test_any_dup8_avx2_nasm(const uint64_t *bs, const int *dist8);
 ;   rdi = bs    (pointer to bitset words)
 ;   rsi = dist8 (pointer to eight int32 distances)
 ; Return EAX = 1 if any duplicate found else 0.
-; Fully unrolled scalar with BT instruction.
-;
-; Build: fasm dup_avx2_unrolled.asm dup_avx2_unrolled.o
+; Fully unrolled SIMD AVX2 gather+variable shift+vptest implementation.
 
-format ELF64
-public test_any_dup8_avx2_asm
+; Build: nasm -f elf64 -o dup_avx2_gather_nasm.o dup_avx2_gather.asm
 
-section '.text' executable
+section .text
+global test_any_dup8_avx2_nasm
 
-test_any_dup8_avx2_asm:
+test_any_dup8_avx2_nasm:
     xor     eax, eax
     ; Load 8x int32 distances
     vmovdqu ymm0, [rsi]

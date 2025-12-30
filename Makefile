@@ -6,8 +6,13 @@ SRCDIR=src
 INCDIR=include
 
 SRC=$(SRCDIR)/main.c $(SRCDIR)/solver.c $(SRCDIR)/lut.c $(SRCDIR)/solver_creative.c $(SRCDIR)/bench.c $(SRCDIR)/dup_avx2_gather.c $(SRCDIR)/dup_avx512.c
-# ASM_SRC=$(SRCDIR)/dup_avx2_unrolled.asm # fasm assembler not available in this environment
-OBJ=$(SRC:.c=.o) # $(ASM_SRC:.asm=.o)
+
+# ASM sources: FASM (unrolled scalar -af), NASM (AVX2 gather -an)
+FASM_OBJ=$(SRCDIR)/dup_avx2_unrolled.o
+NASM_OBJ=$(SRCDIR)/dup_avx2_gather_nasm.o
+
+# Link both ASM implementations
+OBJ=$(SRC:.c=.o) $(FASM_OBJ) $(NASM_OBJ)
 TARGET=$(PREFIX)/golomb
 
 all: $(TARGET)
@@ -19,8 +24,13 @@ $(TARGET): $(OBJ)
 %.o: %.c
 	$(CC) $(CFLAGS) -I$(INCDIR) -c $< -o $@
 
-%.o: %.asm
+# FASM rule (unrolled scalar)
+$(SRCDIR)/dup_avx2_unrolled.o: $(SRCDIR)/dup_avx2_unrolled.asm
 	fasm $< $@
+
+# NASM rule for AVX2 gather (alternative, use with: make ASM_OBJ=src/dup_avx2_gather_nasm.o)
+$(SRCDIR)/dup_avx2_gather_nasm.o: $(SRCDIR)/dup_avx2_gather.asm
+	nasm -f elf64 -o $@ $<
 
 clean:
 	rm -rf $(OBJ) $(TARGET)

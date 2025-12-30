@@ -74,30 +74,48 @@ static __attribute__((unused)) int cp_save_file(const char *path,
     return 1;
 }
 
-/* Optional hand-written assembler version (FASM). Will be NULL if not linked. */
+/* Optional hand-written assembler versions. Will be NULL if not linked. */
 extern int test_any_dup8_avx2_asm(const uint64_t *bs, const int *dist8)
-        __attribute__((weak));
+        __attribute__((weak));  /* FASM unrolled scalar */
+extern int test_any_dup8_avx2_nasm(const uint64_t *bs, const int *dist8)
+        __attribute__((weak));  /* NASM AVX2 gather */
 extern int test_any_dup8_avx2_gather(const uint64_t *bs, const int *dist8)
-        __attribute__((weak));
+        __attribute__((weak));  /* C AVX2 gather */
 extern int test_any_dup8_avx512(const uint64_t *bs, const int *dist8)
         __attribute__((weak));
-extern bool g_use_asm;
+extern bool g_use_asm_fasm;  /* -af flag */
+extern bool g_use_asm_nasm;  /* -an flag */
 
 /* intrinsic fallback prototype */
 static inline int test_any_dup8_avx2(const uint64_t *bs, const int *dist8);
 
 
 
+/* Cached env check - set once at startup */
+static int g_use_avx512 = -1; /* -1 = unchecked, 0 = no, 1 = yes */
+
+static inline int use_avx512_cached(void)
+{
+    if (g_use_avx512 < 0)
+        g_use_avx512 = (getenv("GOLOMB_USE_AVX512") != NULL) ? 1 : 0;
+    return g_use_avx512;
+}
+
 /* Select best available implementation at runtime */
 static inline int test_any_dup8(const uint64_t *bs, const int *dist8)
 {
-    /* Prefer AVX2 gather (widely supported), then AVX-512 if explicitly selected via env */
+    /* -af flag: FASM unrolled scalar */
+    if (g_use_asm_fasm && test_any_dup8_avx2_asm)
+        return test_any_dup8_avx2_asm(bs, dist8);
+    /* -an flag: NASM AVX2 gather */
+    if (g_use_asm_nasm && test_any_dup8_avx2_nasm)
+        return test_any_dup8_avx2_nasm(bs, dist8);
+    /* Then AVX-512 if explicitly selected via env */
+    if (g_use_simd && test_any_dup8_avx512 && use_avx512_cached())
+        return test_any_dup8_avx512(bs, dist8);
+    /* Then C AVX2 gather (widely supported) */
     if (g_use_simd && test_any_dup8_avx2_gather)
         return test_any_dup8_avx2_gather(bs, dist8);
-    if (g_use_simd && test_any_dup8_avx512 && getenv("GOLOMB_USE_AVX512"))
-        return test_any_dup8_avx512(bs, dist8);
-    if (g_use_asm && test_any_dup8_avx2_asm)
-        return test_any_dup8_avx2_asm(bs, dist8);
     return test_any_dup8_avx2(bs, dist8); /* intrinsic fallback */
 }
 
@@ -105,7 +123,8 @@ static inline int test_any_dup8(const uint64_t *bs, const int *dist8)
 /* Bitset helpers ---------------------------------------------------------*/
 /* Global runtime flag set by main.c */
 bool g_use_simd = false;
-bool g_use_asm  = false;
+bool g_use_asm_fasm = false;  /* -af: FASM unrolled scalar */
+bool g_use_asm_nasm = false;  /* -an: NASM AVX2 gather */
 
 static inline void set_bit(uint64_t *bs, int idx) { bs[idx >> 6] |= 1ULL << (idx & 63); }
 static inline void clr_bit(uint64_t *bs, int idx) { bs[idx >> 6] &= ~(1ULL << (idx & 63)); }
@@ -174,6 +193,9 @@ bool dfs(int depth, int n, int target_len, int *pos, uint64_t *dist_bs, bool ver
             max_next = limit;
     }
 
+    /* Pre-compute distances array to avoid recomputation */
+    int dists[MAX_MARKS];
+
     /* try next positions */
     for (int next = last + 1; next <= max_next; ++next)
     {
@@ -181,27 +203,27 @@ bool dfs(int depth, int n, int target_len, int *pos, uint64_t *dist_bs, bool ver
         /* Fast pre-check: most likely duplicate is the newest smallest gap (next-last). */
         if (test_bit_scalar(dist_bs, gap))
             continue;
-        /* check unique distances */
+
+        /* Compute all distances once and check for duplicates */
         bool ok = true;
-        if (g_use_simd && depth >= 6) { /* Use SIMD earlier (helps n<=12) */
-                        int dist8[8];
-            int idx8 = 0;
-            for (int i = 0; i < depth; ++i) {
-                dist8[idx8++] = next - pos[i];
-                if (idx8 == 8) {
-                    if (test_any_dup8(dist_bs, dist8)) { ok = false; break; }
-                    idx8 = 0;
-                }
+        for (int i = 0; i < depth; ++i)
+            dists[i] = next - pos[i];
+
+        if (g_use_simd && depth >= 8) {
+            /* SIMD path: check 8 distances at a time */
+            int i = 0;
+            for (; i + 8 <= depth; i += 8) {
+                if (test_any_dup8(dist_bs, &dists[i])) { ok = false; break; }
             }
-            if (ok && idx8 > 0) {
-                for (int j = 0; j < idx8; ++j) {
-                    if (test_bit_scalar(dist_bs, dist8[j])) { ok = false; break; }
+            /* Check remaining distances */
+            if (ok) {
+                for (; i < depth; ++i) {
+                    if (test_bit_scalar(dist_bs, dists[i])) { ok = false; break; }
                 }
             }
         } else {
             for (int i = 0; i < depth; ++i) {
-                int d = next - pos[i];
-                if (test_bit_scalar(dist_bs, d)) {
+                if (test_bit_scalar(dist_bs, dists[i])) {
                     ok = false;
                     break;
                 }
@@ -209,25 +231,21 @@ bool dfs(int depth, int n, int target_len, int *pos, uint64_t *dist_bs, bool ver
         }
         if (!ok)
             continue;
-        /* commit */
+
+        /* commit - reuse precomputed distances */
         pos[depth] = next;
         for (int i = 0; i < depth; ++i)
-        {
-            int d = next - pos[i];
-            set_bit(dist_bs, d);
-        }
+            set_bit(dist_bs, dists[i]);
+
         if (verbose && depth < 6)
-        {
             printf("depth %d add %d\n", depth, next);
-        }
+
         if (dfs(depth + 1, n, target_len, pos, dist_bs, verbose))
             return true;
-        /* rollback */
+
+        /* rollback - reuse precomputed distances */
         for (int i = 0; i < depth; ++i)
-        {
-            int d = next - pos[i];
-            clr_bit(dist_bs, d);
-        }
+            clr_bit(dist_bs, dists[i]);
     }
     return false;
 }
@@ -503,7 +521,7 @@ bool solve_golomb_mt_dyn(int n, int target_length,
                         set_bit(bs, second);
                         int d13 = third;
                         int d23 = third - second;
-                        if (d13 == second || d23 == second || test_bit(bs, d13) || test_bit(bs, d23))
+                        if (d23 == second || test_bit(bs, d13) || test_bit(bs, d23))
                             continue;
                         set_bit(bs, d13);
                         set_bit(bs, d23);

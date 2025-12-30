@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdint.h>
 
 #define MAX_MARKS 32   /* maximal unterstützte Markierungen */
 #ifndef MAX_LEN_BITSET

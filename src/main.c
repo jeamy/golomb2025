@@ -49,7 +49,8 @@ static void print_help(const char *prog_name)
     printf("  -c                 Use 'creative' multi-threaded solver with dynamic scheduling.\n");
     printf("  -b                 Use best-known ruler length as a starting point heuristic.\n");
     printf("  -e                 Enable SIMD (AVX2) optimizations where available.\n");
-    printf("  -a                 Use hand-written assembler routines.\n");
+    printf("  -af                Use FASM assembler (unrolled scalar).\n");
+    printf("  -an                Use NASM assembler (AVX2 gather).\n");
     printf("  -t                 Run built-in benchmark suite for given <n>.\n");
     printf("  -o <file>          Write the found ruler to a file.\n");
     printf("  -f <file>          Enable checkpointing (mp solver) and save/resume progress at <file>.\n");
@@ -61,6 +62,20 @@ static volatile int g_current_L = -1;
 static volatile int g_done = 0;
 static struct timespec g_ts_start;
 static double g_vt_sec = 0.0;
+
+/* Solver dispatch helper to avoid code duplication */
+typedef enum { SOLVER_SINGLE, SOLVER_MP, SOLVER_DYN, SOLVER_CREATIVE } solver_type_t;
+
+static bool run_solver(solver_type_t type, int n, int L, ruler_t *result, bool verbose)
+{
+    switch (type) {
+        case SOLVER_CREATIVE: return solve_golomb_creative(n, L, result, verbose);
+        case SOLVER_DYN:      return solve_golomb_mt_dyn(n, L, result, verbose);
+        case SOLVER_MP:       return solve_golomb_mt(n, L, result, verbose);
+        case SOLVER_SINGLE:
+        default:              return solve_golomb(n, L, result, verbose);
+    }
+}
 
 /* Checkpointing globals (declared in golomb.h) */
 const char *g_cp_path = NULL;
@@ -122,8 +137,9 @@ int main(int argc, char **argv)
     pthread_t hb_thread;
     bool use_heuristic_start = false;
     bool use_creative = false;
-    bool use_simd = false; /* -e flag (forces on); default decided later by HW */
-    bool use_asm = false;  /* -a flag */
+    bool use_simd = false;     /* -e flag (forces on); default decided later by HW */
+    bool use_asm_fasm = false; /* -af flag: FASM unrolled scalar */
+    bool use_asm_nasm = false; /* -an flag: NASM AVX2 gather */
     char *output_file = NULL;
     bool force_single_thread = false;
     /* parse optional flags */
@@ -185,9 +201,13 @@ int main(int argc, char **argv)
         {
             use_simd = true;
         }
-        else if (strcmp(argv[i], "-a") == 0)
+        else if (strcmp(argv[i], "-af") == 0)
         {
-            use_asm = true;
+            use_asm_fasm = true;
+        }
+        else if (strcmp(argv[i], "-an") == 0)
+        {
+            use_asm_nasm = true;
         }
         else if (strcmp(argv[i], "-t") == 0)
         {
@@ -232,13 +252,16 @@ int main(int argc, char **argv)
 
     ruler_t result;
     extern bool g_use_simd;
-    extern bool g_use_asm;
+    extern bool g_use_asm_fasm;
+    extern bool g_use_asm_nasm;
 /* function pointers to detect which impl is linked (weak) */
 extern int test_any_dup8_avx512(const uint64_t *, const int *) __attribute__((weak));
 extern int test_any_dup8_avx2_gather(const uint64_t *, const int *) __attribute__((weak));
 extern int test_any_dup8_avx2_asm(const uint64_t *, const int *) __attribute__((weak));
+extern int test_any_dup8_avx2_nasm(const uint64_t *, const int *) __attribute__((weak));
     /* Default-enable SIMD if compiled with AVX2/AVX512, or when -e is passed */
-    g_use_asm = use_asm;
+    g_use_asm_fasm = use_asm_fasm;
+    g_use_asm_nasm = use_asm_nasm;
 #if defined(__AVX512F__) || defined(__AVX2__)
     g_use_simd = true;
 #else
@@ -248,14 +271,17 @@ extern int test_any_dup8_avx2_asm(const uint64_t *, const int *) __attribute__((
         /* Ensure OpenMP cancellation is enabled unless the user already set it */
         if (!getenv("OMP_CANCELLATION"))
             setenv("OMP_CANCELLATION", "TRUE", 1);
-        /* Inform user which distance duplicate implementation will be used */
+        /* Inform user which distance duplicate implementation will be used
+         * (must match dispatch order in solver.c test_any_dup8) */
         const char *dup_impl = "scalar (intrinsic)";
-        if (g_use_simd && test_any_dup8_avx2_gather)
-            dup_impl = "AVX2 gather";
+        if (g_use_asm_fasm && test_any_dup8_avx2_asm)
+            dup_impl = "FASM (AVX2 gather asm)";
+        else if (g_use_asm_nasm && test_any_dup8_avx2_nasm)
+            dup_impl = "NASM (AVX2 gather asm)";
         else if (g_use_simd && test_any_dup8_avx512 && getenv("GOLOMB_USE_AVX512"))
             dup_impl = "AVX-512 gather";
-        else if (g_use_asm && test_any_dup8_avx2_asm)
-            dup_impl = "Unrolled hand-ASM";
+        else if (g_use_simd && test_any_dup8_avx2_gather)
+            dup_impl = "AVX2 gather (C)";
         else if (g_use_simd)
             dup_impl = "AVX2 intrinsics";
         printf("[Info] Distance duplicate test implementation: %s\n", dup_impl);
@@ -263,6 +289,14 @@ extern int test_any_dup8_avx2_asm(const uint64_t *, const int *) __attribute__((
     bool solved = false;
     bool compared = false;
     bool optimal = false;
+
+    /* Determine solver type once */
+    solver_type_t solver_type = SOLVER_SINGLE;
+    if (!force_single_thread) {
+        if (use_creative)       solver_type = SOLVER_CREATIVE;
+        else if (use_mt_dyn)    solver_type = SOLVER_DYN;
+        else if (use_mp)        solver_type = SOLVER_MP;
+    }
 
     int base = n * (n - 1) / 2;
     int target_len_start;
@@ -286,44 +320,19 @@ extern int test_any_dup8_avx2_asm(const uint64_t *, const int *) __attribute__((
     g_current_L = target_len_start;
     if (vt_sec > 0.0)
         pthread_create(&hb_thread, NULL, heartbeat_thread, NULL);
+
     /* Pre-check: if LUT exists and -b is NOT used, try the LUT length once */
     if (ref && !use_heuristic_start)
     {
-        int L = ref->length;
-        bool ok;
-        if (force_single_thread)
-            ok = solve_golomb(n, L, &result, verbose);
-        else if (use_creative)
-            ok = solve_golomb_creative(n, L, &result, verbose);
-        else if (use_mt_dyn)
-            ok = solve_golomb_mt_dyn(n, L, &result, verbose);
-        else if (use_mp)
-            ok = solve_golomb_mt(n, L, &result, verbose);
-        else
-            ok = solve_golomb(n, L, &result, verbose);
-        if (ok)
-        {
+        if (run_solver(solver_type, n, ref->length, &result, verbose))
             solved = true;
-        }
     }
+
     for (int L = target_len_start; !solved && L <= MAX_LEN_BITSET; ++L)
     {
-        bool ok;
-        if (force_single_thread)
-            ok = solve_golomb(n, L, &result, verbose);
-        else if (use_creative)
-            ok = solve_golomb_creative(n, L, &result, verbose);
-        else if (use_mt_dyn)
-            ok = solve_golomb_mt_dyn(n, L, &result, verbose);
-        else if (use_mp)
-            ok = solve_golomb_mt(n, L, &result, verbose);
-        else
-            ok = solve_golomb(n, L, &result, verbose);
-
-        if (ok)
+        if (run_solver(solver_type, n, L, &result, verbose))
         {
             solved = true;
-            /* Stop at first successful L (we start from best-known or base) */
             break;
         }
     }
@@ -422,10 +431,15 @@ extern int test_any_dup8_avx2_asm(const uint64_t *, const int *) __attribute__((
         strcat(opts, "-e ");
         strcat(fsuffix, "_e");
     }
-    if (use_asm)
+    if (use_asm_fasm)
     {
-        strcat(opts, "-a ");
-        strcat(fsuffix, "_a");
+        strcat(opts, "-af ");
+        strcat(fsuffix, "_af");
+    }
+    if (use_asm_nasm)
+    {
+        strcat(opts, "-an ");
+        strcat(fsuffix, "_an");
     }
     if (verbose)
     {

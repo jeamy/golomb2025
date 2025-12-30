@@ -14,22 +14,29 @@
 void run_benchmarks(const char *prog, int n)
 {
     const char *variants[] = {
+//        [0]="-af",
+//        [1]="-an",
         "-mp",
         "-mp -b",
         "-mp -e",
-        "-mp -a",
-        "-mp -e -a",
-        "-mp -b -a",
-        "-d",
-        "-d -e",
-        "-d -a",
+        "-mp -af",
+        "-mp -an",
+        "-mp -e -af",
+        "-mp -e -an",
+        "-mp -b -af",
+        "-mp -b -an",
+//        "-d",
+//        "-d -e",
+//        "-d -af",
+//        "-d -an",
         "-c",
         "-c -e",
-        "-c -a",
+        "-c -af",
+        "-c -an",
         NULL
     };
 
-        /* ensure all child solver runs inherit OpenMP cancellation */
+    /* ensure all child solver runs inherit OpenMP cancellation */
     setenv("OMP_CANCELLATION", "TRUE", 1);
     /* ensure output directory exists */
     if (mkdir("out", 0755) == -1 && errno != EEXIST) {

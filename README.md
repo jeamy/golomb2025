@@ -25,11 +25,15 @@ Requirements
 * **x86-64 CPU with AVX2/FMA** – for the optional `-e` SIMD path (auto-detected via `-march=native`).
 * GNU Make, libc.
 
+Optional (only needed for the ASM paths)
+* **FASM** – builds the `-af` assembler implementation.
+* **NASM** – builds the `-an` assembler implementation.
+
 The default flags are `-Wall -O3 -march=native -flto -fopenmp`.  No additional libraries are required.
 
 ## 3  Usage
 ```bash
-./bin/golomb <marks> [-v] [-mp] [-a]
+./bin/golomb <marks> [options]
 ```
 * **marks** – Target order *n* (number of marks).
 
@@ -56,7 +60,8 @@ The default flags are `-Wall -O3 -march=native -flto -fopenmp`.  No additional l
 |------|-------------|
 | `-b` | Use best-known ruler length as a starting point heuristic. |
 | `-e` | Enable SIMD (default if available). |
-| `-a` | Use hand-written assembler hot-spot for distance checking (x86-64 only). |
+| `-af` | Use hand-written assembler hot-spot for distance checking (FASM build; x86-64 only). |
+| `-an` | Use hand-written assembler hot-spot for distance checking (NASM build; x86-64 only). |
 | `-t` | Run built-in benchmark suite for the given order and write `out/bench_n<marks>.txt`. |
 Note on SIMD
 - If compiled with AVX2/AVX-512, SIMD is enabled by default. At runtime the program prefers the AVX2 path; AVX-512 is used only when `GOLOMB_USE_AVX512=1` is set.
@@ -195,53 +200,95 @@ The solver uses recursive backtracking with pruning:
 
 ### Sample Runtimes
 
-Update (2025-08-07)
-- `n = 12`, Flags: `-mp` on AVX2 system: **~0.18–0.21 s**
-  ```bash
-  ./bin/golomb 12 -mp
-  # example: 0.186 s, Optimal ✅
-  ```
-Die folgenden Tabellen sind historisch und teilweise vor der -mp-Neuimplementierung entstanden:
+CPU Bench (2025-12-30)
 
-#### Order n = 13 (this project)
+Sources
+- Summary TSV: `out/bench_n13.txt`
+- Full per-run outputs: `out/GOL_n13_*.txt`
 
-| Flags | Time |
-|-------|------|
-| `-mp` | **3.82 s** |
-| `-mp -b` | 4.06 s |
-| `-mp -e` | 3.83 s |
-| `-mp -a` | 3.81 s |
-| `-c`  | 4.15 s |
+| Flags | `seconds` | Output file |
+|-------|-----------|-------------|
+| `-mp` | 2.325 | `out/GOL_n13_mp.txt` |
+| `-mp -b` | 2.459 | `out/GOL_n13_mp_b.txt` |
+| `-mp -e` | 2.442 | `out/GOL_n13_mp_e.txt` |
+| `-mp -af` | 2.439 | `out/GOL_n13_mp_af.txt` |
+| `-mp -an` | 2.465 | `out/GOL_n13_mp_an.txt` |
+| `-mp -e -af` | 2.427 | `out/GOL_n13_mp_e_af.txt` |
+| `-mp -e -an` | 2.382 | `out/GOL_n13_mp_e_an.txt` |
+| `-mp -b -af` | 2.308 | `out/GOL_n13_mp_b_af.txt` |
+| `-mp -b -an` | 2.365 | `out/GOL_n13_mp_b_an.txt` |
+
+Quick observations
+- `-b` and `-e` have only a small impact for `n=13`.
+- `-af/-an` are correct (same `positions=` / `distances=` as `-mp`), but they are not faster here.
 
 #### Order n = 14 (bench run 2025-07-06)
 
-| Flags | Time (s) |
-|-------|----------|
-| `-mp` | **119.4** |
-| `-mp -b` | 119.8 |
-| `-mp -e` | 121.6 |
-| `-mp -a` | 115.5 |
-| `-mp -e -a` | 120.8 |
-| `-mp -b -a` | 121.8 |
-| `-c` | 111.9 |
-| `-d` | 2323.8 |
-| `-d -e` | 2337.9 |
-| `-d -a` | 2347.9 |
+CPU Bench (2025-12-30)
+
+Sources
+- Summary TSV: `out/bench_n14.txt`
+- Full per-run outputs: `out/GOL_n14_*.txt`
+
+| Flags | `seconds` | Output file |
+|-------|-----------|-------------|
+| `-mp` | 21.342 | `out/GOL_n14_mp.txt` |
+| `-mp -b` | 21.664 | `out/GOL_n14_mp_b.txt` |
+| `-mp -e` | 22.027 | `out/GOL_n14_mp_e.txt` |
+| `-mp -af` | 21.061 | `out/GOL_n14_mp_af.txt` |
+| `-mp -an` | 20.645 | `out/GOL_n14_mp_an.txt` |
+| `-mp -e -af` | 21.017 | `out/GOL_n14_mp_e_af.txt` |
+| `-mp -e -an` | 21.133 | `out/GOL_n14_mp_e_an.txt` |
+| `-mp -b -af` | 20.950 | `out/GOL_n14_mp_b_af.txt` |
+| `-mp -b -an` | 21.386 | `out/GOL_n14_mp_b_an.txt` |
+
+Quick observations
+- For `n=14` the baseline `-mp` runs are ~21s, much slower than `n=13` (expected: search space explosion).
+- `-b` and `-e` are close to noise level here.
+- `-af/-an` are correct (same `positions=` / `distances=` as `-mp`), but they are not faster here.
+
+Difference n=13 vs n=14
+- The baseline runtime increases by ~9× (≈2.3s → ≈21.3s) which is consistent with the rapid growth of the search space.
+- The ASM variants track the baseline closely (same order of magnitude) which indicates there is no useful speedup from `-af/-an` for these runs.
 
 *(wall-clock seconds)*
 
-Einordnung: Für kleine Ordnungen (z. B. n = 12) ist `-mp` nach dem Kandidaten-Ordering Update am schnellsten. Für n = 14 war im historischen Lauf der kreative Solver (`-c`) im Vorteil; je nach Hardware kann sich das verschieben.
+### Benchmark suite variants
 
+The built-in benchmark suite (`-t`) runs a fixed set of flag variants (see `src/bench.c`) and writes a TSV file to `out/bench_n<marks>.txt`.
 
+The benchmark output files are written to the `out/` directory, e.g.
+- `out/bench_n13.txt`
+- `out/bench_n14.txt`
 
+Additionally, each solver run writes a full result file `out/GOL_n<marks>_<suffix>.txt` containing `positions=`, `distances=`, `missing=`, `seconds=`, `options=`, and (if a LUT reference exists) `optimal=`.
 
-All runs used `env OMP_CANCELLATION=TRUE`. For n = 14 the dynamic task solver (`-d`) is roughly **19×** slower than the static solver (`-mp`). The AVX2 path (`-e`) offered no speed-up at this order on the test system.
+Current variants list
 
-Take-aways (aktualisiert 2025-08-07)
-* `-mp` ist nach der Kandidaten-Ordering-Änderung für kleine Ordnungen (z. B. n = 12) sehr schnell (≤ 0.25 s auf AVX2).
-* `-b` beeinflusst ausschließlich die Startlänge. Positionen werden immer vom Solver berechnet.
-* SIMD ist standardmäßig aktiv; AVX-512 wird nur via `GOLOMB_USE_AVX512=1` gewählt, sonst AVX2.
-* `-d` bleibt für diese Größenordnung deutlich langsamer (Task-Overhead).
+```c
+const char *variants[] = {
+    "-mp",
+    "-mp -b",
+    "-mp -e",
+    "-mp -af",
+    "-mp -an",
+    "-mp -e -af",
+    "-mp -e -an",
+    "-mp -b -af",
+    "-mp -b -an",
+    "-c",
+    "-c -e",
+    "-c -af",
+    "-c -an",
+    NULL
+};
+```
+
+### ASM note (`-af/-an`)
+
+The `-af/-an` assembler paths are now consistent with the LUT-verified `-mp` outputs for `n=13` and `n=14` (identical `positions=` / `distances=` in the `out/GOL_*.txt` files).
+
+In these benchmark runs, the ASM paths do not provide a meaningful speedup; in some cases they are slightly slower than the plain `-mp` path.
 
 ### Option Combinations
 
@@ -270,17 +317,19 @@ The `-c` variant was added to bridge the gap between the cheap but rigid `-mp` s
 The following modifier flags can be combined with any solver algorithm (as long as the algorithm itself is selected only once):
 
 * `-e` – enable AVX2 SIMD distance checks when supported.
-* `-a` – use hand-optimised assembly hot-spots (AVX2/AVX-512/Gather dispatch).
+* `-af` / `-an` – use hand-optimised assembly hot-spots for distance checking.
 * `-b` – start search from best-known optimal length instead of naive lower bound.
 
 #### Recommended Combinations
 
--   **For fastest performance:** The static solver (`-mp`) is consistently the fastest option for parallel execution. For larger orders (n ≥ 14), enabling SIMD (`-e`) can provide an additional speed boost.
+-   **For fastest performance (based on the 2025-12-30 runs above):** The static solver (`-mp`) is the default recommendation. In these runs, neither `-e` nor `-af/-an` provided a consistent speedup; they were mostly within noise and sometimes slower.
     ```bash
-    # Recommended for n < 14
+    # Recommended default
     ./bin/golomb <n> -mp
 
-    # Recommended for n >= 14
+    # Optional: experiment if you want to compare on your machine
+    ./bin/golomb <n> -mp -an
+    ./bin/golomb <n> -mp -af
     ./bin/golomb <n> -mp -e
     ```
 

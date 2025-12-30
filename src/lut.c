@@ -47,11 +47,13 @@ const ruler_t *lut_lookup_by_length(int length)
 
 const ruler_t *lut_lookup_by_marks(int marks)
 {
-    for (size_t i = 0; i < LUT_SZ; ++i) {
-        if (optimal_rulers[i].marks == marks)
-            return &optimal_rulers[i];
-    }
-    return NULL;
+    /* Direct index: optimal_rulers[0] is dummy (n=1), [1] is n=2, etc.
+     * So index = marks - 1 for marks >= 1 */
+    if (marks < 1 || (size_t)(marks - 1) >= LUT_SZ)
+        return NULL;
+    const ruler_t *r = &optimal_rulers[marks - 1];
+    /* Verify it's the correct entry (defensive) */
+    return (r->marks == marks) ? r : NULL;
 }
 
 void print_ruler(const ruler_t *r)
