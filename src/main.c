@@ -29,11 +29,12 @@ static void format_elapsed(double sec, char *out, size_t len)
 /* qsort helper */
 static int cmp_int(const void *a, const void *b) { return (*(const int *)a) - (*(const int *)b); }
 
+static void print_help(const char *prog_name);
+
 static void usage(const char *prog)
 {
-    fprintf(stderr, "Usage: %s <marks> [-v] [-mp] [-d] [-b] [-e] [-fi <sec>]\n", prog);
-    fprintf(stderr, "  <marks>  order (number of marks) to search\n");
-    fprintf(stderr, "  -v       verbose output\n  -mp      multithreaded solver (static split)\n  -d       dynamic OpenMP task solver\n  -b       better lower-bound start length\n  -e       SIMD-optimised bitset (experimental)\n  -a       Use hand-written assembler routines (experimental)\n  -t       Run built-in benchmark suite for given <marks>\n");
+    (void)prog;
+    print_help(prog);
     exit(EXIT_FAILURE);
 }
 
@@ -106,7 +107,7 @@ int main(int argc, char **argv)
     // Check for --help first
     for (int i = 1; i < argc; ++i)
     {
-        if (strcmp(argv[i], "--help") == 0)
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0)
         {
             print_help(argv[0]);
             return 0;
