@@ -244,16 +244,6 @@ Sources
 | `-mp -b -af` | 20.950 | `out/GOL_n14_mp_b_af.txt` |
 | `-mp -b -an` | 21.386 | `out/GOL_n14_mp_b_an.txt` |
 
-Quick observations
-- For `n=14` the baseline `-mp` runs are ~21s, much slower than `n=13` (expected: search space explosion).
-- `-b` and `-e` are close to noise level here.
-- `-af/-an` are correct (same `positions=` / `distances=` as `-mp`), but they are not faster here.
-
-Difference n=13 vs n=14
-- The baseline runtime increases by ~9× (≈2.3s → ≈21.3s) which is consistent with the rapid growth of the search space.
-- The ASM variants track the baseline closely (same order of magnitude) which indicates there is no useful speedup from `-af/-an` for these runs.
-
-*(wall-clock seconds)*
 
 ### Benchmark suite variants
 
