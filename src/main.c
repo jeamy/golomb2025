@@ -1,3 +1,4 @@
+#include <stdbool.h>
 #define _POSIX_C_SOURCE 200809L
 #include "golomb.h"
 #include <stdlib.h>
@@ -45,7 +46,8 @@ static void print_help(const char *prog_name)
     printf("Options:\n");
     printf("  -v, --verbose      Enable verbose output during search.\n");
     printf("  -s, --single       Force single-threaded solver.\n");
-    printf("  -mp                Use multi-threaded solver with static work division (default).\n");
+    printf("  -mp                Use multi-threaded solver with static work division (default C path).\n");
+    printf("  -mpa               Use NASM assembler solver with LUT fast-lane (no checkpointing).\n");
     printf("  -d                 Use multi-threaded solver with dynamic OpenMP tasks.\n");
     printf("  -c                 Use 'creative' multi-threaded solver with dynamic scheduling.\n");
     printf("  -b                 Use best-known ruler length as a starting point heuristic.\n");
@@ -65,16 +67,19 @@ static struct timespec g_ts_start;
 static double g_vt_sec = 0.0;
 
 /* Solver dispatch helper to avoid code duplication */
-typedef enum { SOLVER_SINGLE, SOLVER_MP, SOLVER_DYN, SOLVER_CREATIVE } solver_type_t;
+typedef enum { SOLVER_SINGLE, SOLVER_MP, SOLVER_MPA, SOLVER_DYN, SOLVER_CREATIVE } solver_type_t;
 
+/* Solver dispatch helper including ASM -mpa */
 static bool run_solver(solver_type_t type, int n, int L, ruler_t *result, bool verbose)
 {
+    extern bool solve_golomb_mt_asm(int, int, ruler_t*, int);
     switch (type) {
         case SOLVER_CREATIVE: return solve_golomb_creative(n, L, result, verbose);
         case SOLVER_DYN:      return solve_golomb_mt_dyn(n, L, result, verbose);
+        case SOLVER_MPA:      return solve_golomb_mt_asm(n, L, result, verbose ? 1 : 0);
         case SOLVER_MP:       return solve_golomb_mt(n, L, result, verbose);
-        case SOLVER_SINGLE:
-        default:              return solve_golomb(n, L, result, verbose);
+        case SOLVER_SINGLE:   return solve_golomb(n, L, result, verbose);
+        default: return false;
     }
 }
 
@@ -133,6 +138,7 @@ int main(int argc, char **argv)
     bool verbose = false;
     bool run_tests = false;
     bool use_mp = false;
+    bool use_mpa = false;
     bool use_mt_dyn = false;
     double vt_sec = 0.0; /* heartbeat interval in seconds (0 = disabled) */
     pthread_t hb_thread;
@@ -169,6 +175,13 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "-mp") == 0)
         {
             use_mp = true;
+        }
+        else if (strcmp(argv[i], "-mpa") == 0)
+        {
+            use_mpa = true;
+            use_mp = false;
+            use_mt_dyn = false;
+            use_creative = false;
         }
         else if (strcmp(argv[i], "-d") == 0)
         {
@@ -296,6 +309,7 @@ extern int test_any_dup8_avx2_nasm(const uint64_t *, const int *) __attribute__(
     if (!force_single_thread) {
         if (use_creative)       solver_type = SOLVER_CREATIVE;
         else if (use_mt_dyn)    solver_type = SOLVER_DYN;
+        else if (use_mpa)       solver_type = SOLVER_MPA;
         else if (use_mp)        solver_type = SOLVER_MP;
     }
 
@@ -414,6 +428,11 @@ extern int test_any_dup8_avx2_nasm(const uint64_t *, const int *) __attribute__(
     {
         strcat(opts, "-d ");
         strcat(fsuffix, "_d");
+    }
+    else if (use_mpa)
+    {
+        strcat(opts, "-mpa ");
+        strcat(fsuffix, "_mpa");
     }
     else if (use_mp)
     {

@@ -53,6 +53,9 @@ bool solve_golomb_mt_dyn(int n, int target_length, ruler_t *out, bool verbose);
 /* Creative solver (now queue-based) */
 bool solve_golomb_creative(int n, int target_length, ruler_t *out, bool verbose);
 
+/* NASM assembler solver (-mpa): LUT fast-lane, no checkpoint */
+bool solve_golomb_mt_asm(int n, int target_length, ruler_t *out, int verbose);
+
 
 /* Global runtime flag: 1 => use AVX2 SIMD path where available */
 extern bool g_use_simd;

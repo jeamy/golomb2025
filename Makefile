@@ -11,9 +11,10 @@ SRC=$(SRCDIR)/main.c $(SRCDIR)/solver.c $(SRCDIR)/lut.c $(SRCDIR)/solver_creativ
 # ASM sources: FASM (unrolled scalar -af), NASM (AVX2 gather -an)
 FASM_OBJ=$(ASMDIR)/dup_avx2_unrolled.o
 NASM_OBJ=$(ASMDIR)/dup_avx2_gather_nasm.o
+ASM_MP_OBJ=$(ASMDIR)/solver_mp_v2.o
 
 # Link both ASM implementations
-OBJ=$(SRC:.c=.o) $(FASM_OBJ) $(NASM_OBJ)
+OBJ=$(SRC:.c=.o) $(FASM_OBJ) $(NASM_OBJ) $(ASM_MP_OBJ)
 TARGET=$(PREFIX)/golomb
 
 all: $(TARGET)
@@ -31,6 +32,10 @@ $(ASMDIR)/dup_avx2_unrolled.o: $(ASMDIR)/dup_avx2_unrolled.asm
 
 # NASM rule for AVX2 gather (alternative, use with: make ASM_OBJ=src/dup_avx2_gather_nasm.o)
 $(ASMDIR)/dup_avx2_gather_nasm.o: $(ASMDIR)/dup_avx2_gather.asm
+	nasm -f elf64 -o $@ $<
+
+# NASM rule for ASM -mpa solver
+$(ASMDIR)/solver_mp_v2.o: $(ASMDIR)/solver_mp_v2.asm
 	nasm -f elf64 -o $@ $<
 
 clean:
