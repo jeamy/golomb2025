@@ -192,6 +192,7 @@ The solver uses recursive backtracking with pruning:
 4. Apply symmetry-breaking: the second mark is limited to ≤ L/2, eliminating mirrored solutions.
 5. Parallelisation
    - `-mp` – Parallelisierung über eine geordnete Kandidatenliste der Paare (second, third) mit OpenMP `parallel for` und `schedule(dynamic, 16)`. Falls eine LUT für `n` existiert, werden die Paare nach Nähe zum LUT-Paar `(ref->pos[1], ref->pos[2])` sortiert, sodass vielversprechende Kandidaten zuerst geprüft werden. Frühabbruch über gemeinsames Flag.
+   - `-mpa` – Option A: OpenMP-Harness in C (Kandidatenliste + LUT-Ordering + Taskloop), aber die eigentliche DFS/Backtracking-Logik läuft in NASM (`dfs_asm`).
    - `-d`  – dynamic tasks: OpenMP tasks from 2nd mark downward for automatic work-stealing (erfordert `OMP_CANCELLATION=TRUE`).
 
 ● **With LUT entry** – If an optimal length for the requested order exists in the LUT, the solver starts at that length and verifies the result: *Optimal ✅* or *Not optimal ❌*.
@@ -209,6 +210,7 @@ Sources
 | Flags | `seconds` | Output file |
 |-------|-----------|-------------|
 | `-mp` | 2.325 | `out/GOL_n13_mp.txt` |
+| `-mpa` | 3.517 | `out/GOL_n13_mpa.txt` |
 | `-mp -b` | 2.459 | `out/GOL_n13_mp_b.txt` |
 | `-mp -e` | 2.442 | `out/GOL_n13_mp_e.txt` |
 | `-mp -af` | 2.439 | `out/GOL_n13_mp_af.txt` |

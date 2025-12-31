@@ -6,7 +6,7 @@ SRCDIR=src
 INCDIR=include
 ASMDIR=$(SRCDIR)/asm
 
-SRC=$(SRCDIR)/main.c $(SRCDIR)/solver.c $(SRCDIR)/lut.c $(SRCDIR)/solver_creative.c $(SRCDIR)/bench.c $(SRCDIR)/dup_avx2_gather.c $(SRCDIR)/dup_avx512.c
+SRC=$(SRCDIR)/main.c $(SRCDIR)/solver.c $(SRCDIR)/solver_mpa_harness.c $(SRCDIR)/lut.c $(SRCDIR)/solver_creative.c $(SRCDIR)/bench.c $(SRCDIR)/dup_avx2_gather.c $(SRCDIR)/dup_avx512.c
 
 # ASM sources: FASM (unrolled scalar -af), NASM (AVX2 gather -an)
 FASM_OBJ=$(ASMDIR)/dup_avx2_unrolled.o

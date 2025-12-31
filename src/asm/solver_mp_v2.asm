@@ -28,7 +28,38 @@ extern test_any_dup8_avx2_gather
 extern g_use_simd
 
 ; Exportierte Funktionen
-global solve_golomb_mt_asm
+global dfs_asm
+
+%macro TEST_BIT_INLINE 0
+    mov     eax, esi
+    shr     eax, 6
+    and     esi, 63
+    mov     ecx, esi
+    mov     rax, [rdi + rax*8]
+    shr     rax, cl
+    and     eax, 1
+%endmacro
+
+%macro SET_BIT_INLINE 0
+    mov     eax, esi
+    shr     eax, 6
+    and     esi, 63
+    mov     ecx, esi
+    mov     rdx, 1
+    shl     rdx, cl
+    or      [rdi + rax*8], rdx
+%endmacro
+
+%macro CLR_BIT_INLINE 0
+    mov     eax, esi
+    shr     eax, 6
+    and     esi, 63
+    mov     ecx, esi
+    mov     rdx, 1
+    shl     rdx, cl
+    not     rdx
+    and     [rdi + rax*8], rdx
+%endmacro
 
 ; ============================================================================
 ; Bitset-Hilfsfunktionen
@@ -79,7 +110,7 @@ test_bit_scalar:
 ; Args: edi=depth, esi=n, edx=target_len, rcx=pos*, r8=dist_bs*, r9d=verbose
 ; Return: eax = 0 (false) or 1 (true)
 
-dfs:
+dfs_asm:
     push    rbp
     mov     rbp, rsp
     push    rbx
@@ -162,7 +193,7 @@ dfs:
     push    r9
     mov     rdi, rbx
     mov     esi, eax
-    call    test_bit_scalar
+    TEST_BIT_INLINE
     pop     r9
     pop     rcx
     test    eax, eax
@@ -181,34 +212,72 @@ dfs:
     jmp     .compute_dists
 
 .dists_done:
-    ; Check for duplicates (scalar path only for simplicity)
-    xor     esi, esi            ; i = 0
-.check_loop:
-    cmp     esi, r15d
-    jge     .all_ok
-    
-    mov     edx, [rbp - 304 + rsi*4]  ; dists[i]
-    
-    ; Bounds check
+    ; Check for duplicates
+    ; Preserve loop regs while calling helpers
+    sub     rsp, 32
+    mov     [rsp], rcx
+    mov     [rsp + 8], r9
+    mov     [rsp + 16], r10
+    mov     [rsp + 24], r11
+
+    ; SIMD path if enabled and depth >= 8
+    movzx   eax, byte [g_use_simd]
+    test    eax, eax
+    jz      .dup_scalar
+    cmp     r15d, 8
+    jl      .dup_scalar
+
+    xor     r8d, r8d            ; i = 0
+.dup_simd_loop:
+    mov     eax, r8d
+    add     eax, 8
+    cmp     eax, r15d
+    jg      .dup_simd_remainder
+    mov     rdi, rbx
+    lea     rsi, [rbp - 304 + r8*4]
+    call    test_any_dup8_avx2_gather
+    test    eax, eax
+    jnz     .dup_fail
+    add     r8d, 8
+    jmp     .dup_simd_loop
+
+.dup_simd_remainder:
+    jmp     .dup_scalar_from
+
+.dup_scalar:
+    xor     r8d, r8d            ; i = 0
+
+.dup_scalar_from:
+    cmp     r8d, r15d
+    jge     .dup_ok
+
+    mov     edx, [rbp - 304 + r8*4]  ; dists[i]
     cmp     edx, MAX_LEN_BITSET
-    jge     .skip_candidate
-    
-    push    rcx
-    push    rsi
-    push    r9
-    push    rdi
+    jge     .dup_fail
+
     mov     rdi, rbx
     mov     esi, edx
-    call    test_bit_scalar
-    pop     rdi
-    pop     r9
-    pop     rsi
-    pop     rcx
+    TEST_BIT_INLINE
     test    eax, eax
-    jnz     .skip_candidate
-    
-    inc     esi
-    jmp     .check_loop
+    jnz     .dup_fail
+
+    inc     r8d
+    jmp     .dup_scalar_from
+
+.dup_fail:
+    mov     r11, [rsp + 24]
+    mov     r10, [rsp + 16]
+    mov     r9,  [rsp + 8]
+    mov     rcx, [rsp]
+    add     rsp, 32
+    jmp     .skip_candidate
+
+.dup_ok:
+    mov     r11, [rsp + 24]
+    mov     r10, [rsp + 16]
+    mov     r9,  [rsp + 8]
+    mov     rcx, [rsp]
+    add     rsp, 32
 
 .all_ok:
     ; Commit: pos[depth] = next
@@ -227,7 +296,7 @@ dfs:
     push    rdi
     mov     rdi, rbx
     mov     esi, edx
-    call    set_bit
+    SET_BIT_INLINE
     pop     rdi
     pop     r9
     pop     rsi
@@ -253,7 +322,7 @@ dfs:
     mov     rcx, r12
     mov     r8, rbx
     ; r9d already has verbose
-    call    dfs
+    call    dfs_asm
 
     mov     r11, [rsp + 24]
     mov     r10, [rsp + 16]
@@ -277,7 +346,7 @@ dfs:
     push    rdi
     mov     rdi, rbx
     mov     esi, edx
-    call    clr_bit
+    CLR_BIT_INLINE
     pop     rdi
     pop     r9
     pop     rsi
@@ -314,7 +383,7 @@ dfs:
 ; bool solve_golomb_mt_asm(int n, int target_length, ruler_t *out, int verbose)
 ; Args: edi=n, esi=target_length, rdx=out*, ecx=verbose
 
-solve_golomb_mt_asm:
+solve_golomb_mt_asm_unused:
     push    rbp
     mov     rbp, rsp
     push    rbx
@@ -355,6 +424,115 @@ solve_golomb_mt_asm:
 
     ; pos[0] = 0
     mov     dword [rbx], 0
+
+    ; Fast lane: try LUT (second,third) first unless GOLOMB_NO_HINTS is set
+    lea     rdi, [rel .no_hints_env]
+    call    getenv
+    test    rax, rax
+    jnz     .skip_fastlane
+    mov     edi, r15d
+    call    lut_lookup_by_marks
+    test    rax, rax
+    jz      .skip_fastlane
+
+    ; s0 = ref->pos[1], t0 = ref->pos[2]
+    mov     r8d, dword [rax + 12]
+    mov     r9d, dword [rax + 16]
+
+    ; bounds: s0>=1, s0<=second_max, t0>s0, t0<=T
+    ; (second_max and T computed below, so compute minimal vars now)
+    mov     eax, r14d
+    shr     eax, 1
+    mov     r10d, eax
+    mov     eax, r15d
+    sub     eax, 2
+    mov     ecx, r14d
+    sub     ecx, eax            ; ecx = T
+    mov     eax, ecx
+    dec     eax
+    cmp     r10d, eax
+    cmovg   r10d, eax
+    cmp     r10d, 1
+    jge     .fastlane_bounds_ok
+    mov     r10d, 1
+.fastlane_bounds_ok:
+    cmp     r8d, 1
+    jl      .skip_fastlane
+    cmp     r8d, r10d
+    jg      .skip_fastlane
+    cmp     r9d, r8d
+    jle     .skip_fastlane
+    cmp     r9d, ecx
+    jg      .skip_fastlane
+
+    ; reset dist_buf
+    xor     rax, rax
+    mov     rdx, BS_WORDS
+.fastlane_zero:
+    mov     [r12 + rdx*8 - 8], rax
+    dec     rdx
+    jnz     .fastlane_zero
+
+    ; set initial pos
+    mov     dword [rbx], 0
+    mov     dword [rbx + 4], r8d
+    mov     dword [rbx + 8], r9d
+
+    ; set_bit(dist, s0)
+    mov     rdi, r12
+    mov     esi, r8d
+    call    set_bit
+
+    ; d23 = t0 - s0
+    mov     edx, r9d
+    sub     edx, r8d
+
+    ; if test_bit(dist, t0) || test_bit(dist, d23) -> skip
+    mov     rdi, r12
+    mov     esi, r9d
+    call    test_bit_scalar
+    test    eax, eax
+    jnz     .skip_fastlane
+    mov     rdi, r12
+    mov     esi, edx
+    call    test_bit_scalar
+    test    eax, eax
+    jnz     .skip_fastlane
+
+    ; set remaining distances
+    mov     rdi, r12
+    mov     esi, edx
+    call    set_bit
+    mov     rdi, r12
+    mov     esi, r9d
+    call    set_bit
+
+    ; call dfs(3,...)
+    mov     edi, 3
+    mov     esi, r15d
+    mov     edx, r14d
+    mov     rcx, rbx
+    mov     r8, r12
+    xor     r9d, r9d
+    call    dfs_asm
+    test    eax, eax
+    jz      .skip_fastlane
+
+    ; success
+    mov     eax, r15d
+    dec     eax
+    mov     eax, [rbx + rax*4]
+    mov     [r13], eax
+    mov     [r13 + 4], r15d
+    lea     rdi, [r13 + 8]
+    mov     rsi, rbx
+    mov     edx, r15d
+    shl     edx, 2
+    call    memcpy
+    mov     eax, 1
+    jmp     .epilogue
+
+.skip_fastlane:
 
     ; Symmetry break: second_max = target_length / 2
     mov     eax, r14d
@@ -457,7 +635,7 @@ solve_golomb_mt_asm:
     mov     rcx, rbx
     mov     r8, r12
     xor     r9d, r9d            ; verbose=false
-    call    dfs
+    call    dfs_asm
     mov     r9, [rsp + 16]
     mov     r8, [rsp + 8]
     mov     rcx, [rsp]
@@ -508,3 +686,6 @@ solve_golomb_mt_asm:
     pop     rbx
     pop     rbp
     ret
+
+.no_hints_env:
+    db 'GOLOMB_NO_HINTS',0
