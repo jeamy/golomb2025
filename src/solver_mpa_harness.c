@@ -40,7 +40,8 @@ bool solve_golomb_mt_asm(int n, int target_length, ruler_t *out, int verbose)
     ruler_t res_local;
 
     int half = target_length / 2;
-    int T = target_length - (n - 2);
+    /* Tight bound: t <= L - (n-3) since (n-3) marks remain after pos[2]=t. */
+    int T = target_length - (n - 3);
     int second_max = half;
     if (second_max > T - 1) second_max = T - 1;
     if (second_max < 1) second_max = 1;

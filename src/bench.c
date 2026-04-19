@@ -14,8 +14,6 @@
 void run_benchmarks(const char *prog, int n)
 {
     const char *variants[] = {
-//        [0]="-af",
-//        [1]="-an",
         "-mp",
         "-mp -b",
         "-mp -e",
@@ -25,10 +23,6 @@ void run_benchmarks(const char *prog, int n)
         "-mp -e -an",
         "-mp -b -af",
         "-mp -b -an",
-//        "-d",
-//        "-d -e",
-//        "-d -af",
-//        "-d -an",
         "-c",
         "-c -e",
         "-c -af",

@@ -7,6 +7,8 @@
 
 /* ----------------------------------------------------------------------
  * SAT-based Golomb ruler solver (flag `-x`)
+ * NOTE: Currently NOT linked by the default Makefile (no -x wiring in main.c).
+ * Build manually with: gcc -Iinclude -c src/solver_sat.c and link as needed.
  * ----------------------------------------------------------------------
  *  1. Boolean variables v(i,p) encode that mark i is placed at absolute
  *     position p where 0 ≤ p ≤ L.
@@ -120,22 +122,19 @@ static bool parse_model(const char *model_path, int n, int L, int *out_pos)
     FILE *fp = fopen(model_path, "r");
     if (!fp) return false;
     char tok[64];
-    if (!(fscanf(fp, "%63s", tok) == 1)) { fclose(fp); return false; }
-    if (strcmp(tok, "UNSAT") == 0 || strcmp(tok, "s") == 0) {
-        /* if in DIMACS format kissat prints: s UNSATISFIABLE */
-        if (strcmp(tok, "s") == 0) {
-            fscanf(fp, "%63s", tok); /* read UNSATISFIABLE */
-        }
+    if (fscanf(fp, "%63s", tok) != 1) { fclose(fp); return false; }
+    /* Handle common prefixes: "SAT" (minisat), "s SATISFIABLE" (DIMACS/kissat),
+     * "UNSAT" / "s UNSATISFIABLE" for unsatisfiable. */
+    if (strcmp(tok, "s") == 0) {
+        if (fscanf(fp, "%63s", tok) != 1) { fclose(fp); return false; }
+        if (strncmp(tok, "UNSAT", 5) == 0) { fclose(fp); return false; }
+        /* "SATISFIABLE" -> continue reading v-lines */
+    } else if (strcmp(tok, "UNSAT") == 0) {
         fclose(fp); return false;
     }
+    /* otherwise tok is "SAT" (minisat) – fall through to literal parsing */
 
-    /* if first token not SAT, read next if solver prints banner */
-    if (strcmp(tok, "SAT") != 0 && strcmp(tok, "s") == 0) {
-        /* we already consumed 's', need next token SATISFIABLE or SAT */
-        fscanf(fp, "%63s", tok);
-    }
-
-    /* read variable assignments (lines start with v) */
+    /* read variable assignments */
     int lit;
     while (fscanf(fp, "%d", &lit) == 1) {
         if (lit == 0) continue;
@@ -148,6 +147,12 @@ static bool parse_model(const char *model_path, int n, int L, int *out_pos)
     }
     fclose(fp);
     return true;
+}
+
+static int cmp_int_asc(const void *a, const void *b)
+{
+    int x = *(const int*)a, y = *(const int*)b;
+    return (x > y) - (x < y);
 }
 
 static bool is_golomb(int n, const int *pos)
@@ -185,7 +190,9 @@ bool solve_golomb_sat(int n, int target_length, ruler_t *out, bool verbose)
             if (verbose) fprintf(stderr, "[SAT] UNSAT at L=%d\n", L);
             continue; /* try next length */
         }
-        /* sort positions by mark index already ascending */
+        /* SAT solver assigns marks to positions without monotonic ordering,
+         * so we must sort the resulting positions ascending before using them. */
+        qsort(pos, (size_t)n, sizeof(int), cmp_int_asc);
         if (!is_golomb(n, pos)) {
             if (verbose) fprintf(stderr, "[SAT] model at L=%d violated distance uniqueness, continue.\n", L);
             continue;

@@ -119,11 +119,10 @@ __global__ void prefilter_kernel(int n, int L, Cand *cands, int64_t total, unsig
         int du0 = u;       // u - 0
         int du1 = u - s;   // u - s
         int du2 = u - t;   // u - t
-        // uniqueness vs existing
+        // uniqueness vs existing (du0,du1,du2 are pairwise distinct since 0<s<t<u)
         if (du0 == d_s || du0 == d_t || du0 == d_st) continue;
         if (du1 == d_s || du1 == d_t || du1 == d_st) continue;
         if (du2 == d_s || du2 == d_t || du2 == d_st) continue;
-        // pairwise distinct among du0,du1,du2 always true as 0<s<t<u
         ok1 = 1; // one-step feasible
 
         // Two-step feasibility: try to place v > u
@@ -147,16 +146,14 @@ __global__ void prefilter_kernel(int n, int L, Cand *cands, int64_t total, unsig
             if (dv1 == d_s || dv1 == d_t || dv1 == d_st || dv1 == du0 || dv1 == du1 || dv1 == du2) continue;
             if (dv2 == d_s || dv2 == d_t || dv2 == d_st || dv2 == du0 || dv2 == du1 || dv2 == du2) continue;
             if (dv3 == d_s || dv3 == d_t || dv3 == d_st || dv3 == du0 || dv3 == du1 || dv3 == du2) continue;
-            // pairwise distinct among dv0..dv3; trivial order ensures dv0>dv1>dv2>dv3>0 but check collisions among dv* themselves:
-            if (dv0 == dv1 || dv0 == dv2 || dv0 == dv3) continue;
-            if (dv1 == dv2 || dv1 == dv3) continue;
-            if (dv2 == dv3) continue;
+            // dv0 > dv1 > dv2 > dv3 > 0 (strict) since 0<s<t<u<v, so pairwise distinct by construction.
             ok2 = 2; best_u = (best_u == 0 ? u : best_u); break;
         }
         if (ok2) break;
         if (!best_u) best_u = u; // remember first one-step-feasible u as fallback
     }
-    ok[i] = ok2 ? ok2 : ok1;
+    // ok1 sets bit0, ok2 sets bit1: combine into a single status byte.
+    ok[i] = (unsigned char)(ok1 | ok2);
     cands[i].u_hint = best_u;
 }
 
@@ -289,9 +286,9 @@ int main(int argc, char **argv)
     g_vt_sec = vt_min > 0 ? vt_min * 60.0 : 0.0;
     pthread_t hb_th; if (g_vt_sec > 0.0) pthread_create(&hb_th, NULL, heartbeat_thread, NULL);
 
-    // Build candidates like -mp
+    // Build candidates like -mp. After pos[2]=t, (n-3) marks remain -> t <= L - (n-3).
     int half = target_length / 2;
-    int T = target_length - (n - 2);
+    int T = target_length - (n - 3);
     int second_max = half; if (second_max > T - 1) second_max = T - 1; if (second_max < 1) second_max = 1;
 
     long long total = 0;
@@ -419,7 +416,6 @@ int main(int argc, char **argv)
         for (long long j = 0; j < (long long)warm_idx.size(); ++j) {
             if (found) continue;
             long long i = warm_idx[(size_t)j];
-            if (found) continue;
             int second = cands[(size_t)i].s;
             int third  = cands[(size_t)i].t;
             if (third - second == second) continue; // skip isosceles triangle
@@ -430,7 +426,7 @@ int main(int argc, char **argv)
             if (test_bit64(bs, d13) || test_bit64(bs, d23)) continue;
             set_bit64(bs, d13); set_bit64(bs, d23);
             if (dfs(3, n, target_length, pos, bs, verbose)) {
-                #pragma omp critical
+                #pragma omp critical(set_result)
                 {
                     if (!found) { res_local.marks = n; res_local.length = pos[n - 1]; memcpy(res_local.pos, pos, n * sizeof(int)); found = 1; }
                 }
@@ -490,7 +486,7 @@ int main(int argc, char **argv)
                         int pos_u[MAX_MARKS];
                         pos_u[0] = pos[0]; pos_u[1] = pos[1]; pos_u[2] = pos[2]; pos_u[3] = u;
                         if (dfs(4, n, target_length, pos_u, bs_u, verbose)) {
-                            #pragma omp critical
+                            #pragma omp critical(set_result)
                             {
                                 if (!found) { res_local.marks = n; res_local.length = pos_u[n - 1]; memcpy(res_local.pos, pos_u, n * sizeof(int)); found = 1; }
                             }
@@ -511,7 +507,7 @@ int main(int argc, char **argv)
                     }
                 }
                 if (!ok_found && dfs(3, n, target_length, pos, bs, verbose)) {
-                    #pragma omp critical
+                    #pragma omp critical(set_result)
                     {
                         if (!found) { res_local.marks = n; res_local.length = pos[n - 1]; memcpy(res_local.pos, pos, n * sizeof(int)); found = 1; }
                     }
@@ -525,7 +521,7 @@ checkpoint_update:
             struct timespec ts_now; clock_gettime(CLOCK_MONOTONIC, &ts_now);
             time_t dt = ts_now.tv_sec - ts_last_flush.tv_sec;
             if (dt >= cp_interval) {
-                #pragma omp critical
+                #pragma omp critical(cp_io)
                 {
                     struct timespec ts_chk; clock_gettime(CLOCK_MONOTONIC, &ts_chk);
                     if (ts_chk.tv_sec - ts_last_flush.tv_sec >= cp_interval) {

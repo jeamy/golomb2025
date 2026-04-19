@@ -19,7 +19,8 @@ typedef struct {
     uint32_t hint_used; /* 0/1 */
 } cp_header_t;
 
-static __attribute__((unused)) int cp_load_file(const char *path,
+#ifdef _OPENMP
+static int cp_load_file(const char *path,
                         int n,
                         int target_length,
                         long long total,
@@ -42,7 +43,7 @@ static __attribute__((unused)) int cp_load_file(const char *path,
     return r == want;
 }
 
-static __attribute__((unused)) int cp_save_file(const char *path,
+static int cp_save_file(const char *path,
                         int n,
                         int target_length,
                         long long total,
@@ -73,6 +74,7 @@ static __attribute__((unused)) int cp_save_file(const char *path,
     if (rename(tmp, path) != 0) { remove(tmp); return 0; }
     return 1;
 }
+#endif /* _OPENMP */
 
 /* Optional hand-written assembler versions. Will be NULL if not linked. */
 extern int test_any_dup8_avx2_asm(const uint64_t *bs, const int *dist8)
@@ -91,13 +93,20 @@ static inline int test_any_dup8_avx2(const uint64_t *bs, const int *dist8);
 
 
 
-/* Cached env check - set once at startup */
-static int g_use_avx512 = -1; /* -1 = unchecked, 0 = no, 1 = yes */
+/* Cached env check - initialised once in solver entry points to avoid racy first-use */
+static int g_use_avx512 = 0;
+static int g_avx512_inited = 0;
+
+static inline void init_avx512_flag(void)
+{
+    if (!g_avx512_inited) {
+        g_use_avx512 = (getenv("GOLOMB_USE_AVX512") != NULL) ? 1 : 0;
+        g_avx512_inited = 1;
+    }
+}
 
 static inline int use_avx512_cached(void)
 {
-    if (g_use_avx512 < 0)
-        g_use_avx512 = (getenv("GOLOMB_USE_AVX512") != NULL) ? 1 : 0;
     return g_use_avx512;
 }
 
@@ -165,10 +174,7 @@ static inline int test_any_dup8_avx2(const uint64_t *bs, const int *dist8)
 #endif
 }
 
-static inline int test_bit(const uint64_t *bs, int idx)
-{
-    return test_bit_scalar(bs, idx);
-}
+#define test_bit(bs, idx) test_bit_scalar((bs), (idx))
 
 /* Recursive branch&bound with distance bitset */
 bool dfs(int depth, int n, int target_len, int *pos, uint64_t *dist_bs, bool verbose)
@@ -254,6 +260,7 @@ bool solve_golomb(int n, int target_length, ruler_t *out, bool verbose)
 {
     if (n > MAX_MARKS || target_length > MAX_LEN_BITSET)
         return false;
+    init_avx512_flag();
     int pos[MAX_MARKS] = {0};
     uint64_t dist_bs[BS_WORDS] = {0};
 
@@ -274,11 +281,26 @@ bool solve_golomb(int n, int target_length, ruler_t *out, bool verbose)
 #endif
 
 
+#ifdef _OPENMP
+/* File-scope comparator for candidate ordering (avoids GCC nested-function extension,
+ * which requires executable stack trampolines incompatible with -Wl,-z,noexecstack). */
+typedef struct { int s, t, score; } cand_t;
+static int cand_cmp(const void *a, const void *b)
+{
+    const cand_t *x = (const cand_t*)a;
+    const cand_t *y = (const cand_t*)b;
+    if (x->score != y->score) return x->score - y->score;
+    if (x->s != y->s)         return x->s - y->s;
+    return x->t - y->t;
+}
+#endif
+
 bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose)
 {
 #ifdef _OPENMP
     if (n > MAX_MARKS || target_length > MAX_LEN_BITSET)
         return false;
+    init_avx512_flag();
     /* Very small orders (<=3) are faster single-threaded */
     if (n <= 3)
     {
@@ -288,7 +310,9 @@ bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose)
     ruler_t res_local;
 
     int half = target_length / 2; /* symmetry break */
-    int T = target_length - (n - 2);
+    /* After placing pos[2]=t there are (n-3) further marks, each with min gap 1,
+     * so pos[n-1] >= t + (n-3). Hence t <= L - (n-3). */
+    int T = target_length - (n - 3);
     int second_max = half;
     if (second_max > T - 1) second_max = T - 1;
     if (second_max < 1) second_max = 1;
@@ -320,7 +344,6 @@ bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose)
             }
         }
     }
-    typedef struct { int s, t, score; } cand_t;
     long long total = 0;
     /* Worst-case pairs is ~second_max*(T-second_max/2) < 1e6 for our ranges, malloc ok */
     cand_t *cands = NULL;
@@ -336,7 +359,6 @@ bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose)
     int use_hint_order = (ref && !getenv("GOLOMB_NO_HINTS")) ? 1 : 0;
     for (int s = 1; s <= second_max; ++s) {
         for (int t = s + 1; t <= T; ++t) {
-            if (t <= s) continue;
             int score = 0;
             if (use_hint_order) {
                 int ds = s - ref->pos[1]; if (ds < 0) ds = -ds;
@@ -347,14 +369,7 @@ bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose)
         }
     }
     if (use_hint_order && cands && total > 1) {
-        /* stable sort by score ascending */
-        int cmp(const void *a, const void *b) {
-            const cand_t *x = (const cand_t*)a, *y = (const cand_t*)b;
-            if (x->score != y->score) return x->score - y->score;
-            if (x->s != y->s) return x->s - y->s;
-            return x->t - y->t;
-        }
-        qsort(cands, (size_t)total, sizeof(cand_t), cmp);
+        qsort(cands, (size_t)total, sizeof(cand_t), cand_cmp);
     }
 
     /* ---------------- Checkpoint/Resume setup (only for -mp) ---------------- */
@@ -492,56 +507,80 @@ bool solve_golomb_mt_dyn(int n, int target_length,
 #ifdef _OPENMP
     if (n > MAX_MARKS || target_length > MAX_LEN_BITSET)
         return false;
+    init_avx512_flag();
     if (n <= 3)
         return solve_golomb(n, target_length, out, verbose);
 
     volatile int found = 0; /* shared flag  */
     ruler_t local;          /* winning ruler */
 
+    const int half = target_length / 2;             /* symmetry break */
+    const int T    = target_length - (n - 3);       /* tight bound for third */
+    int second_max = half;
+    if (second_max > T - 1) second_max = T - 1;
+    if (second_max < 1) second_max = 1;
+
+    /* Flatten (second, third) pair space so taskloop balances uniformly. */
+    long long total = 0;
+    for (int s = 1; s <= second_max; ++s) {
+        int cnt = T - s;
+        if (cnt > 0) total += cnt;
+    }
+    if (total <= 0) return false;
+
+    cand_t *cands = (cand_t*)malloc((size_t)total * sizeof(cand_t));
+    if (!cands) return false;
+    {
+        long long k = 0;
+        for (int s = 1; s <= second_max; ++s)
+            for (int t = s + 1; t <= T; ++t)
+                cands[k++] = (cand_t){ s, t, 0 };
+    }
+
 #pragma omp parallel
     {
 #pragma omp single
         {
-            const int half = target_length / 2; /* symmetry break */
-
 #pragma omp taskgroup
             {
-                /* flatten (second, third) space; batch 64 combos per task */
-#pragma omp taskloop grainsize(32) firstprivate(n, target_length, verbose) shared(found, local)
-                for (int second = 1; second <= half; ++second)
-                    for (int third = second + 1; third <= target_length - (n - 2); ++third)
-                    {
-                        if (found) continue; /* early poll */
+#pragma omp taskloop grainsize(64) firstprivate(n, target_length, verbose) shared(found, local, cands, total)
+                for (long long i = 0; i < total; ++i)
+                {
+                    if (found) continue; /* early poll */
 
-                        int pos[MAX_MARKS];
-                        uint64_t bs[BS_WORDS] = {0};
-                        pos[0] = 0;
-                        pos[1] = second;
-                        pos[2] = third;
-                        set_bit(bs, second);
-                        int d13 = third;
-                        int d23 = third - second;
-                        if (d23 == second || test_bit(bs, d13) || test_bit(bs, d23))
-                            continue;
-                        set_bit(bs, d13);
-                        set_bit(bs, d23);
-                        if (dfs(3, n, target_length, pos, bs, false)) {
-                            int old;
+                    int second = cands[i].s;
+                    int third  = cands[i].t;
+
+                    int pos[MAX_MARKS];
+                    uint64_t bs[BS_WORDS] = {0};
+                    pos[0] = 0;
+                    pos[1] = second;
+                    pos[2] = third;
+                    set_bit(bs, second);
+                    int d13 = third;
+                    int d23 = third - second;
+                    if (d23 == second || test_bit(bs, d13) || test_bit(bs, d23))
+                        continue;
+                    set_bit(bs, d13);
+                    set_bit(bs, d23);
+                    if (dfs(3, n, target_length, pos, bs, verbose)) {
+                        int old;
 #pragma omp atomic capture
-                            { old = found; found = 1; }
-                            if (old == 0) {
-                                local.marks = n;
-                                local.length = pos[n - 1];
-                                memcpy(local.pos, pos, n * sizeof(int));
-                                /* stop remaining tasks */
+                        { old = found; found = 1; }
+                        if (old == 0) {
+                            local.marks = n;
+                            local.length = pos[n - 1];
+                            memcpy(local.pos, pos, n * sizeof(int));
+                            /* stop remaining tasks */
 #pragma omp cancel taskgroup
-                            }
                         }
                     }
+                }
             } /* taskgroup */
         } /* single */
     } /* parallel */
 
+    free(cands);
     if (found)
     {
         *out = local;

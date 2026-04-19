@@ -38,9 +38,14 @@ static const size_t LUT_SZ = sizeof(optimal_rulers)/sizeof(optimal_rulers[0]);
 
 const ruler_t *lut_lookup_by_length(int length)
 {
-    for (size_t i = 0; i < LUT_SZ; ++i) {
-        if (optimal_rulers[i].length == length)
-            return &optimal_rulers[i];
+    /* Table is sorted ascending by length -> use binary search. */
+    size_t lo = 0, hi = LUT_SZ;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        int mlen = optimal_rulers[mid].length;
+        if (mlen == length) return &optimal_rulers[mid];
+        if (mlen < length)  lo = mid + 1;
+        else                hi = mid;
     }
     return NULL;
 }
