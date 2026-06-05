@@ -1,0 +1,104 @@
+Golomb solver benchmark
+Range: n=9..12
+Runs per solver: 8
+Timeout per run: 5000 ms
+Reference: LUT/out-derived optimal length plus validation against Golomb distances
+Important: solvers are timed through their public solve_* functions; no solver result is injected by this benchmark.
+
+============================================================
+n=9 expected_length=44 expected_marks=[0 1 5 12 25 27 35 41 44]
+
+Physics:
+  run=01 start
+  run=01 timeout=yes found=no valid=no length=-1 optimal=no elapsed_ms=5001.054532 marks=[]
+  run=02 start
+  run=02 timeout=no found=no valid=no length=-1 optimal=no elapsed_ms=3760.181342 marks=[]
+  run=03 start
+  run=03 timeout=yes found=no valid=no length=-1 optimal=no elapsed_ms=5000.024230 marks=[]
+  run=04 start
+  run=04 timeout=no found=no valid=no length=-1 optimal=no elapsed_ms=4412.478860 marks=[]
+  run=05 start
+  run=05 timeout=no found=no valid=no length=-1 optimal=no elapsed_ms=4576.833040 marks=[]
+  run=06 start
+  run=06 timeout=no found=no valid=no length=-1 optimal=no elapsed_ms=4526.140872 marks=[]
+  run=07 start
+  run=07 timeout=yes found=no valid=no length=-1 optimal=no elapsed_ms=5000.333000 marks=[]
+  run=08 start
+  run=08 timeout=no found=no valid=no length=-1 optimal=no elapsed_ms=4664.258809 marks=[]
+  summary valid=0/8 optimal=0/8 timeouts=3/8 avg_ms=4617.663086 min_ms=3760.181342 max_ms=5001.054532
+
+Algebraic:
+  run=01 start
+  run=01 timeout=no found=no valid=no length=-1 optimal=no elapsed_ms=1.388633 marks=[]
+  run=02 start
+  run=02 timeout=no found=no valid=no length=-1 optimal=no elapsed_ms=1.360153 marks=[]
+  run=03 start
+  run=03 timeout=no found=no valid=no length=-1 optimal=no elapsed_ms=1.269494 marks=[]
+  run=04 start
+  run=04 timeout=no found=no valid=no length=-1 optimal=no elapsed_ms=1.301394 marks=[]
+  run=05 start
+  run=05 timeout=no found=no valid=no length=-1 optimal=no elapsed_ms=1.273693 marks=[]
+  run=06 start
+  run=06 timeout=no found=no valid=no length=-1 optimal=no elapsed_ms=1.270694 marks=[]
+  run=07 start
+  run=07 timeout=no found=no valid=no length=-1 optimal=no elapsed_ms=1.256633 marks=[]
+  run=08 start
+  run=08 timeout=no found=no valid=no length=-1 optimal=no elapsed_ms=1.295024 marks=[]
+  summary valid=0/8 optimal=0/8 timeouts=0/8 avg_ms=1.301965 min_ms=1.256633 max_ms=1.388633
+
+Evolutionary:
+  run=01 start
+  run=01 timeout=no found=no valid=no length=-1 optimal=no elapsed_ms=465.226945 marks=[]
+  run=02 start
+  run=02 timeout=no found=no valid=no length=-1 optimal=no elapsed_ms=474.241659 marks=[]
+  run=03 start
+  run=03 timeout=no found=no valid=no length=-1 optimal=no elapsed_ms=466.035547 marks=[]
+  run=04 start
+  run=04 timeout=no found=no valid=no length=-1 optimal=no elapsed_ms=449.044570 marks=[]
+  run=05 start
+  run=05 timeout=no found=no valid=no length=-1 optimal=no elapsed_ms=474.216570 marks=[]
+  run=06 start
+  run=06 timeout=no found=no valid=no length=-1 optimal=no elapsed_ms=480.454876 marks=[]
+  run=07 start
+  run=07 timeout=no found=no valid=no length=-1 optimal=no elapsed_ms=465.775257 marks=[]
+  run=08 start
+  run=08 timeout=no found=no valid=no length=-1 optimal=no elapsed_ms=464.301562 marks=[]
+  summary valid=0/8 optimal=0/8 timeouts=0/8 avg_ms=467.412123 min_ms=449.044570 max_ms=480.454876
+
+Traditional-Opt:
+  run=01 start
+  run=01 timeout=no found=yes valid=no length=44 optimal=no elapsed_ms=1.373584 marks=[0 1 3 9 23 27 34 39 44]
+  run=02 start
+  run=02 timeout=no found=yes valid=no length=44 optimal=no elapsed_ms=1.211833 marks=[0 1 3 9 23 27 34 39 44]
+  run=03 start
+  run=03 timeout=no found=yes valid=no length=44 optimal=no elapsed_ms=1.173724 marks=[0 1 3 9 23 27 34 39 44]
+  run=04 start
+  run=04 timeout=no found=yes valid=no length=44 optimal=no elapsed_ms=1.214163 marks=[0 1 3 9 23 27 34 39 44]
+  run=05 start
+  run=05 timeout=no found=yes valid=no length=44 optimal=no elapsed_ms=1.205243 marks=[0 1 3 9 23 27 34 39 44]
+  run=06 start
+  run=06 timeout=no found=yes valid=no length=44 optimal=no elapsed_ms=1.193224 marks=[0 1 3 9 23 27 34 39 44]
+  run=07 start
+  run=07 timeout=no found=yes valid=no length=44 optimal=no elapsed_ms=1.230063 marks=[0 1 3 9 23 27 34 39 44]
+  run=08 start
+  run=08 timeout=no found=yes valid=no length=44 optimal=no elapsed_ms=1.178863 marks=[0 1 3 9 23 27 34 39 44]
+  summary valid=0/8 optimal=0/8 timeouts=0/8 avg_ms=1.222587 min_ms=1.173724 max_ms=1.373584
+
+Traditional:
+  run=01 start
+  run=01 timeout=no found=yes valid=yes length=44 optimal=yes elapsed_ms=1.161893 marks=[0 1 5 12 25 27 35 41 44]
+  run=02 start
+  run=02 timeout=no found=yes valid=yes length=44 optimal=yes elapsed_ms=1.186143 marks=[0 1 5 12 25 27 35 41 44]
+  run=03 start
+  run=03 timeout=no found=yes valid=yes length=44 optimal=yes elapsed_ms=1.272244 marks=[0 1 5 12 25 27 35 41 44]
+  run=04 start
+  run=04 timeout=no found=yes valid=yes length=44 optimal=yes elapsed_ms=1.247223 marks=[0 1 5 12 25 27 35 41 44]
+  run=05 start
+  run=05 timeout=no found=yes valid=yes length=44 optimal=yes elapsed_ms=1.239524 marks=[0 1 5 12 25 27 35 41 44]
+  run=06 start
+  run=06 timeout=no found=yes valid=yes length=44 optimal=yes elapsed_ms=1.219763 marks=[0 1 5 12 25 27 35 41 44]
+  run=07 start
+  run=07 timeout=no found=yes valid=yes length=44 optimal=yes elapsed_ms=1.205223 marks=[0 1 5 12 25 27 35 41 44]
+  run=08 start
+  run=08 timeout=no found=yes valid=yes length=44 optimal=yes elapsed_ms=1.164063 marks=[0 1 5 12 25 27 35 41 44]
+  summary valid=8/8 optimal=8/8 timeouts=0/8 avg_ms=1.212010 min_ms=1.161893 max_ms=1.272244

@@ -45,15 +45,23 @@ The default flags are `-Wall -O3 -march=native -flto -fopenmp`.  No additional l
 | `-o <file>` | Write result to a specific output file. |
 | `-f <file>` | Enable checkpointing for `-mp` and save/resume progress to/from <file>. |
 | `-fi <sec>` | Checkpoint flush interval in seconds (default 60). |
+| `-T <num>` | Set number of OpenMP threads for parallel solvers (default: all available cores). Affects `-mp`, `-d`, `-c`, `-g`, `-p`. |
 | `--help`| Display this help message and exit. |
 
-**Solver Types**
+**Solver Types (DFS-based, exact)**
 | Flag | Description |
 |------|-------------|
 | `-s` | Force single-threaded execution (highest priority). |
 | `-c` | Use creative solver. |
 | `-d` | Use dynamic task-based solver. |
 | `-mp`| Use multi-processing solver (static split, lowest priority). |
+| `-to`| Traditional optimized solver (endpoint-aware DFS). Implies `-b`. |
+
+**Solver Types (heuristic, non-exact)**
+| Flag | Description |
+|------|-------------|
+| `-g` | Evolutionary solver (iterated min-conflicts local search). Implies `-b`. |
+| `-p` | Physics solver (discrete simulated annealing). Implies `-b`. |
 
 **Optimizations**
 | Flag | Description |
@@ -176,9 +184,14 @@ golomb-2025/
 ├── include/          # public headers
 │   └── golomb.h
 ├── src/              # C implementation
-│   ├── lut.c         # built-in optimal rulers table & helpers
-│   ├── solver.c      # branch-and-bound solver (bitset, OpenMP)
-│   └── main.c        # CLI / program entry
+│   ├── lut.c                  # built-in optimal rulers table & helpers
+│   ├── solver.c               # branch-and-bound solver (bitset, OpenMP)
+│   ├── solver_traditional_opt.c  # endpoint-aware DFS (-to)
+│   ├── solver_evolution.c     # iterated min-conflicts local search (-g)
+│   ├── solver_physics.c       # discrete simulated annealing (-p)
+│   ├── solver_creative.c      # hybrid work-stealing solver (-c)
+│   └── main.c                 # CLI / program entry
+├── test/             # benchmark and test programs
 ├── Makefile
 ├── LICENSE
 └── README.md
@@ -288,12 +301,16 @@ In these benchmark runs, the ASM paths do not provide a meaningful speedup; in s
 
 The solver flags determine the core algorithm used and are mutually exclusive. If multiple solver flags are provided, the program will use only one based on the following priority:
 
-1.  `-s` (Single-threaded)
-2.  `-c` (Creative solver)
-3.  `-d` (Dynamic task solver)
-4.  `-mp` (Static multi-threaded solver)
+1.  `-p` (Physics / Simulated Annealing)
+2.  `-g` (Evolutionary / Min-Conflicts)
+3.  `-to` (Traditional Optimized DFS)
+4.  `-c` (Creative solver)
+5.  `-d` (Dynamic task solver)
+6.  `-mpa` (NASM assembler solver)
+7.  `-mp` (Static multi-threaded solver)
+8.  `-s` / default (Single-threaded)
 
-For example, if both `-mp` and `-s` are used, the `-s` flag takes precedence, and the program will run on a single thread.
+For example, if both `-mp` and `-g` are used, the `-g` flag takes precedence.
 
 #### Solver Algorithms Explained
 
@@ -303,8 +320,87 @@ For example, if both `-mp` and `-s` are used, the `-s` flag takes precedence, an
 | `-mp` | Static multi-threaded solver | OpenMP `parallel for` (fixed chunks) | Splits the first decision level evenly among threads once; minimal overhead, excellent cache locality.
 | `-d` | Dynamic task solver | OpenMP tasks (recursive) | Each recursive call can spawn a task; uses `OMP_CANCELLATION` so threads that finish early can cancel siblings once a solution is found. Offers perfect load balancing but high task-management overhead.
 | `-c` | Creative solver | Custom hybrid work-stealing pool | Starts with a static top-level split like `-mp`, then dynamically re-balances deeper nodes via a lock-free work queue. Adaptive granularity heuristics keep the task count low while preventing idle threads.
+| `-to` | Traditional optimized | none | Endpoint-aware DFS that fixes the right endpoint L from the start and prunes distances to L immediately. 3–4× faster than `-s` for same search space.
+| `-g` | Evolutionary (Min-Conflicts) | none | Iterated local search: randomly place marks, then repeatedly move the most conflicting mark to its best position. Restarts with optional crossover from best-seen solution. Runs until solution found.
+| `-p` | Physics (Simulated Annealing) | none | Discrete SA over integer positions with conflict-oriented neighborhood: selects a conflicting mark, samples k random positions, accepts best via Metropolis criterion. Runs until solution found.
 
 The `-c` variant was added to bridge the gap between the cheap but rigid `-mp` split and the flexible but heavyweight `-d` tasks. On medium-sized search spaces (e.g. n = 14–16) it often yields the best wall-time.
+
+#### Heuristic Solvers (`-g`, `-p`)
+
+These solvers use stochastic local search and are **not** exhaustive. They implicitly set `-b` (start at the known optimal length from LUT) and run until a valid Golomb ruler is found or the process is interrupted.
+
+- **`-g` (Evolutionary/Min-Conflicts)**: Reliable for n ≤ 12 (typically finds optimal in seconds). For larger n the search time grows steeply but the solver will eventually find a solution.
+- **`-p` (Physics/SA)**: Reliable for n ≤ 11. For n = 12+ the success probability per restart is lower; the solver keeps retrying indefinitely.
+- **`-to` (Traditional Optimized)**: Exact DFS, always finds the solution. Faster than `-s` by 3–4× due to endpoint-aware pruning.
+
+These solvers only attempt the LUT target length (no L-incrementing loop). If no LUT entry exists for the given n, they fall back to a heuristic lower bound.
+
+**Parallel restarts**: Both `-g` and `-p` run multiple independent restarts in parallel using OpenMP. Each thread has its own RNG state and working memory — no synchronization overhead. The first thread to find a valid ruler wins; all others terminate immediately. Use `-T <num>` to control the number of threads (default: all cores). This provides near-linear speedup in the probability of finding a solution per unit time.
+
+#### Detailed Algorithm Descriptions
+
+##### Traditional Optimized (`-to`) — Endpoint-Aware Branch & Bound
+
+The standard DFS solver places marks left-to-right and only discovers whether `pos[n-1] == L` at the deepest recursion level. The optimized variant fixes both endpoints from the start:
+
+1. **Setup**: `pos[0] = 0`, `pos[n-1] = L`. The distance L is immediately marked as used.
+2. **Recursive expansion**: For each candidate position `next`, the solver checks:
+   - Distance to the previous mark: `next - pos[depth-1]`
+   - **Distance to the fixed endpoint**: `L - next` (this is the key optimization)
+   - All distances to previously placed marks
+3. **Pruning**: Branches are rejected as soon as *any* distance collides — including the endpoint distance. This prunes the tree much earlier than the standard solver, which only validates the endpoint constraint at the very bottom.
+4. **Symmetry breaking**: The first inner mark is limited to `≤ L/2`.
+
+**Complexity**: Worst-case exponential (exact solver), but the early endpoint pruning reduces the effective search space by 3–4× compared to the standard DFS.
+
+##### Evolutionary Solver (`-g`) — Iterated Min-Conflicts with Crossover
+
+A stochastic local search that treats the Golomb ruler problem as a constraint satisfaction problem (CSP). The "conflicts" are duplicate distances.
+
+**Outer loop** (restarts until solution found):
+1. **Initialization**: Place n marks randomly on `[0, L]` with fixed endpoints `0` and `L`.
+2. Every 3rd restart: use **distance-aware crossover** between the best-seen solution and a fresh random individual to seed the next local search (memetic diversity injection).
+
+**Inner loop** (min-conflicts local search, budget = 800·n iterations per restart):
+1. **Conflict detection**: Build `dist_count[d]` — how often each distance d occurs. `total_conflicts` = number of distances that occur more than once.
+2. **Variable selection**: Randomly pick an inner mark that participates in at least one conflict.
+3. **Value selection** (best-move scan): Remove the mark from `dist_count`, then scan *all* L−2 free positions. For each candidate position p, count conflicts it would create:
+   - `dist_count[d] > 0` → collision with existing distances
+   - `seen_this[d]` → self-collision (two new distances from p are equal)
+   - Select the position with the fewest conflicts (ties broken randomly).
+4. **Plateau escape**: If the best move returns the mark to its old position for 12 consecutive iterations, replace it with a random free position instead.
+5. **Stagnation restart**: If `total_conflicts` hasn't improved for `4·n` iterations, randomize all inner marks and rebuild `dist_count`.
+
+**Key data structures**:
+- `dist_count[0..L]`: frequency array of all pairwise distances (O(1) lookup, O(n) update per move)
+- `seen_this[0..L]`: temporary array to detect self-collisions during the best-move scan
+- `occupied[0..L]`: boolean array tracking which positions are taken
+
+**Incremental updates**: `mc_remove_mark` and `mc_add_mark` update `dist_count` in O(n) per move, avoiding a full O(n²) rebuild.
+
+##### Physics Solver (`-p`) — Discrete Simulated Annealing
+
+A thermodynamics-inspired optimization that treats marks as particles on a discrete integer lattice, with "energy" equal to the number of distance conflicts.
+
+**Outer loop** (restarts until solution found):
+1. **Random initialization**: Place n marks randomly on `[0, L]` with fixed endpoints.
+2. Sort marks. Compute initial `dist_count` and `total` conflicts.
+
+**Inner loop** (SA with conflict-oriented neighborhood, 600·n² iterations per restart):
+1. **Conflict-driven variable selection**: Identify all inner marks involved in at least one duplicate distance. Randomly select one.
+2. **Neighborhood sampling**: Remove the selected mark from `dist_count`. Sample `k = 8 + 2·T` random free positions (T = current temperature). For each sample, estimate the conflicts it would produce (fast O(n) probe using `dist_count`). Keep the best candidate.
+3. **Exact evaluation**: Insert the best candidate into `dist_count` via `sa_add` (which counts actual conflicts including self-duplicates). Compute `delta = new_total - original_total`.
+4. **Metropolis acceptance**:
+   - If `delta ≤ 0` (improvement): accept unconditionally.
+   - If `delta > 0` (worsening): accept with probability `exp(-delta / T)`.
+   - Otherwise: undo the move (restore old position in `dist_count`).
+5. **Cooling schedule**: `T *= 0.99995`, clamped at `T_min = 0.005`.
+6. **Reheating**: If no accepted move for `4·n` iterations, reset `T = 2.0`.
+
+**Key insight**: The sampling size `k` is temperature-dependent. At high T, few samples are drawn (more random exploration). As T decreases, more samples are drawn (more greedy, hill-climbing behavior). This smoothly transitions from random search to local optimization.
+
+**Correctness safeguard**: When `total ≤ 0` (potential incremental drift), a full O(n²) recount is triggered. Solutions are sorted before output.
 
 The following modifier flags can be combined with any solver algorithm (as long as the algorithm itself is selected only once):
 

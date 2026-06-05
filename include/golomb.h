@@ -45,6 +45,10 @@ bool dfs(int depth, int n, int target_len, int *pos, uint64_t *dist_bs, bool ver
  */
 bool solve_golomb(int n, int target_length, ruler_t *out, bool verbose);
 
+/* Traditional optimized: endpoint-aware branch & bound (right endpoint L fixed,
+ * distance to L checked immediately for earlier pruning). Honest classical DFS. */
+bool solve_golomb_traditional_opt(int n, int target_length, ruler_t *out, bool verbose);
+
 /* Multi-threaded variant (OpenMP). Explores top-level branches in parallel. */
 bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose);
 /* Dynamic OpenMP task-based solver (enable with -d) */
@@ -52,6 +56,12 @@ bool solve_golomb_mt_dyn(int n, int target_length, ruler_t *out, bool verbose);
 
 /* Creative solver (now queue-based) */
 bool solve_golomb_creative(int n, int target_length, ruler_t *out, bool verbose);
+
+/* Physics-based solver: Simulated Annealing + Velocity Verlet integration */
+bool solve_golomb_physics(int n, int target_length, ruler_t *out, bool verbose);
+
+/* Evolutionary solver: Genetic algorithm with distance-aware crossover */
+bool solve_golomb_evolutionary(int n, int target_length, ruler_t *out, bool verbose);
 
 /* NASM assembler solver (-mpa): LUT fast-lane, no checkpoint */
 bool solve_golomb_mt_asm(int n, int target_length, ruler_t *out, int verbose);

@@ -5,6 +5,9 @@
 #include <string.h>
 #include <time.h>
 #include <pthread.h>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 #include <unistd.h>
 #include <sys/wait.h>
 #include "bench.h"
@@ -50,6 +53,9 @@ static void print_help(const char *prog_name)
     printf("  -mpa               Use NASM assembler solver with LUT fast-lane (no checkpointing).\n");
     printf("  -d                 Use multi-threaded solver with dynamic OpenMP tasks.\n");
     printf("  -c                 Use 'creative' multi-threaded solver with dynamic scheduling.\n");
+    printf("  -p                 Use physics-based solver (Simulated Annealing). Implies -b.\n");
+    printf("  -g                 Use evolutionary/genetic solver (Min-Conflicts). Implies -b.\n");
+    printf("  -to                Use traditional optimized solver (endpoint-aware DFS). Implies -b.\n");
     printf("  -b                 Use best-known ruler length as a starting point heuristic.\n");
     printf("  -e                 Enable SIMD (AVX2) optimizations where available.\n");
     printf("  -af                Use FASM assembler (unrolled scalar).\n");
@@ -58,6 +64,7 @@ static void print_help(const char *prog_name)
     printf("  -o <file>          Write the found ruler to a file.\n");
     printf("  -f <file>          Enable checkpointing (mp solver) and save/resume progress at <file>.\n");
     printf("  -fi <sec>          Checkpoint flush interval in seconds (default 60).\n");
+    printf("  -T <num>           Set number of threads for parallel solvers (default: all cores).\n");
     printf("  --help             Display this help message and exit.\n");
 }
 
@@ -67,18 +74,25 @@ static struct timespec g_ts_start;
 static double g_vt_sec = 0.0;
 
 /* Solver dispatch helper to avoid code duplication */
-typedef enum { SOLVER_SINGLE, SOLVER_MP, SOLVER_MPA, SOLVER_DYN, SOLVER_CREATIVE } solver_type_t;
+typedef enum { SOLVER_SINGLE, SOLVER_MP, SOLVER_MPA, SOLVER_DYN, SOLVER_CREATIVE, 
+               SOLVER_PHYSICS, SOLVER_EVOLUTIONARY, SOLVER_TRAD_OPT } solver_type_t;
 
 /* Solver dispatch helper including ASM -mpa */
 static bool run_solver(solver_type_t type, int n, int L, ruler_t *result, bool verbose)
 {
     extern bool solve_golomb_mt_asm(int, int, ruler_t*, int);
+    extern bool solve_golomb_physics(int, int, ruler_t*, bool);
+    extern bool solve_golomb_evolutionary(int, int, ruler_t*, bool);
+    extern bool solve_golomb_traditional_opt(int, int, ruler_t*, bool);
     switch (type) {
-        case SOLVER_CREATIVE: return solve_golomb_creative(n, L, result, verbose);
-        case SOLVER_DYN:      return solve_golomb_mt_dyn(n, L, result, verbose);
-        case SOLVER_MPA:      return solve_golomb_mt_asm(n, L, result, verbose ? 1 : 0);
-        case SOLVER_MP:       return solve_golomb_mt(n, L, result, verbose);
-        case SOLVER_SINGLE:   return solve_golomb(n, L, result, verbose);
+        case SOLVER_CREATIVE:     return solve_golomb_creative(n, L, result, verbose);
+        case SOLVER_DYN:          return solve_golomb_mt_dyn(n, L, result, verbose);
+        case SOLVER_MPA:          return solve_golomb_mt_asm(n, L, result, verbose ? 1 : 0);
+        case SOLVER_MP:           return solve_golomb_mt(n, L, result, verbose);
+        case SOLVER_PHYSICS:      return solve_golomb_physics(n, L, result, verbose);
+        case SOLVER_EVOLUTIONARY: return solve_golomb_evolutionary(n, L, result, verbose);
+        case SOLVER_TRAD_OPT:     return solve_golomb_traditional_opt(n, L, result, verbose);
+        case SOLVER_SINGLE:       return solve_golomb(n, L, result, verbose);
         default: return false;
     }
 }
@@ -144,6 +158,9 @@ int main(int argc, char **argv)
     pthread_t hb_thread;
     bool use_heuristic_start = false;
     bool use_creative = false;
+    bool use_physics = false;
+    bool use_evolutionary = false;
+    bool use_trad_opt = false;
     bool use_simd = false;     /* -e flag (forces on); default decided later by HW */
     bool use_asm_fasm = false; /* -af flag: FASM unrolled scalar */
     bool use_asm_nasm = false; /* -an flag: NASM AVX2 gather */
@@ -195,6 +212,18 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "-c") == 0)
         {
             use_creative = true;
+        }
+        else if (strcmp(argv[i], "-p") == 0)
+        {
+            use_physics = true;
+        }
+        else if (strcmp(argv[i], "-g") == 0)
+        {
+            use_evolutionary = true;
+        }
+        else if (strcmp(argv[i], "-to") == 0)
+        {
+            use_trad_opt = true;
         }
         else if (strcmp(argv[i], "-vt") == 0)
         {
@@ -252,6 +281,23 @@ int main(int argc, char **argv)
                 return EXIT_FAILURE;
             }
         }
+        else if (strcmp(argv[i], "-T") == 0)
+        {
+            if (i + 1 < argc)
+            {
+                int nt = atoi(argv[++i]);
+                if (nt > 0) {
+#ifdef _OPENMP
+                    omp_set_num_threads(nt);
+#endif
+                }
+            }
+            else
+            {
+                fprintf(stderr, "Error: -T option requires a thread count.\n");
+                return EXIT_FAILURE;
+            }
+        }
         else
             usage(argv[0]);
     }
@@ -306,12 +352,19 @@ extern int test_any_dup8_avx2_nasm(const uint64_t *, const int *) __attribute__(
 
     /* Determine solver type once */
     solver_type_t solver_type = SOLVER_SINGLE;
-    if (!force_single_thread) {
+    if (use_physics)        solver_type = SOLVER_PHYSICS;
+    else if (use_evolutionary) solver_type = SOLVER_EVOLUTIONARY;
+    else if (use_trad_opt)  solver_type = SOLVER_TRAD_OPT;
+    else if (!force_single_thread) {
         if (use_creative)       solver_type = SOLVER_CREATIVE;
         else if (use_mt_dyn)    solver_type = SOLVER_DYN;
         else if (use_mpa)       solver_type = SOLVER_MPA;
         else if (use_mp)        solver_type = SOLVER_MP;
     }
+
+    /* -g, -p, -a, -to implizieren -b (starten beim LUT-Wert). */
+    if (use_physics || use_evolutionary || use_trad_opt)
+        use_heuristic_start = true;
 
     int base = n * (n - 1) / 2;
     int target_len_start;
@@ -343,6 +396,11 @@ extern int test_any_dup8_avx2_nasm(const uint64_t *, const int *) __attribute__(
             solved = true;
     }
 
+    /* Heuristische Solver (-g, -p, -a) probieren nur den LUT-Wert.
+     * L-Hochiterieren wuerde bei jedem L das interne Zeitbudget verbrauchen
+     * und suboptimale Lineale finden. */
+    bool heuristic_only = (use_physics || use_evolutionary);
+
     for (int L = target_len_start; !solved && L <= MAX_LEN_BITSET; ++L)
     {
         if (run_solver(solver_type, n, L, &result, verbose))
@@ -350,6 +408,7 @@ extern int test_any_dup8_avx2_nasm(const uint64_t *, const int *) __attribute__(
             solved = true;
             break;
         }
+        if (heuristic_only) break;  /* nur einen L-Wert versuchen */
     }
 
     if (ref)
@@ -418,6 +477,16 @@ extern int test_any_dup8_avx2_nasm(const uint64_t *, const int *) __attribute__(
     {
         strcat(opts, "-s ");
         strcat(fsuffix, "_s");
+    }
+    else if (use_physics)
+    {
+        strcat(opts, "-p ");
+        strcat(fsuffix, "_p");
+    }
+    else if (use_evolutionary)
+    {
+        strcat(opts, "-g ");
+        strcat(fsuffix, "_g");
     }
     else if (use_creative)
     {

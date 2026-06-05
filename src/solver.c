@@ -1,3 +1,25 @@
+/* ==========================================================================
+ * SOLVER.C — Core Branch-and-Bound DFS Solver with OpenMP Parallelization
+ * ==========================================================================
+ *
+ * This file contains:
+ *   1. The standard recursive DFS solver (solve_golomb / dfs) that places
+ *      marks left-to-right and backtracks on duplicate distances.
+ *   2. The multi-threaded static solver (solve_golomb_mt / -mp) that
+ *      parallelizes over the first two decision levels (second, third mark)
+ *      using OpenMP taskloop with optional LUT-guided candidate ordering.
+ *   3. The dynamic task solver (solve_golomb_mt_dyn / -d) using recursive
+ *      OpenMP tasks with cancellation.
+ *   4. Checkpointing support for the -mp solver (binary bitset of processed
+ *      candidate pairs, periodic flushing).
+ *   5. SIMD distance-checking helpers (AVX2 gather, AVX-512, ASM backends).
+ *
+ * Distance tracking:
+ *   All solvers use a bitset (uint64_t dist_bs[BS_WORDS]) where bit `d`
+ *   is set iff distance `d` already appears in the current partial ruler.
+ *   This allows O(1) duplicate detection per distance.
+ * ========================================================================== */
+
 #include "golomb.h"
 #include <string.h>
 #include <immintrin.h> /* AVX2 intrinsics */
@@ -7,7 +29,7 @@
 #include <time.h>
 #include <errno.h>
 
-/* ---------------- Checkpointing helpers ---------------- */
+/* ==================== Checkpointing helpers ==================== */
 typedef struct {
     char magic[4];      /* "GRCP" */
     uint32_t version;   /* 1 */
@@ -76,7 +98,10 @@ static int cp_save_file(const char *path,
 }
 #endif /* _OPENMP */
 
-/* Optional hand-written assembler versions. Will be NULL if not linked. */
+/* ==================== Optional ASM backends (weak symbols) ====================
+ * These are hand-written assembler implementations for the distance-duplicate
+ * check. They are weakly linked: if the object file is not present, the
+ * pointer remains NULL and the C fallback is used instead. */
 extern int test_any_dup8_avx2_asm(const uint64_t *bs, const int *dist8)
         __attribute__((weak));  /* FASM unrolled scalar */
 extern int test_any_dup8_avx2_nasm(const uint64_t *bs, const int *dist8)
@@ -88,12 +113,13 @@ extern int test_any_dup8_avx512(const uint64_t *bs, const int *dist8)
 extern bool g_use_asm_fasm;  /* -af flag */
 extern bool g_use_asm_nasm;  /* -an flag */
 
-/* intrinsic fallback prototype */
+/* Intrinsic C fallback prototype (defined below). */
 static inline int test_any_dup8_avx2(const uint64_t *bs, const int *dist8);
 
 
 
-/* Cached env check - initialised once in solver entry points to avoid racy first-use */
+/* Cached env check for AVX-512 preference.
+ * Initialized once in solver entry points to avoid racy first-use. */
 static int g_use_avx512 = 0;
 static int g_avx512_inited = 0;
 
@@ -110,7 +136,12 @@ static inline int use_avx512_cached(void)
     return g_use_avx512;
 }
 
-/* Select best available implementation at runtime */
+/* ---------------------------------------------------------------------------
+ * test_any_dup8 -- Runtime dispatch for 8-distance duplicate check.
+ *
+ * Priority: ASM FASM > ASM NASM > AVX-512 (env) > C AVX2 gather > intrinsic.
+ * Returns 1 if ANY of the 8 distances already exists in the bitset.
+ * --------------------------------------------------------------------------- */
 static inline int test_any_dup8(const uint64_t *bs, const int *dist8)
 {
     /* -af flag: FASM unrolled scalar */
@@ -129,8 +160,8 @@ static inline int test_any_dup8(const uint64_t *bs, const int *dist8)
 }
 
 
-/* Bitset helpers ---------------------------------------------------------*/
-/* Global runtime flag set by main.c */
+/* ==================== Bitset helpers ==================== */
+/* Global runtime flags set by main.c via command-line parsing. */
 bool g_use_simd = false;
 bool g_use_asm_fasm = false;  /* -af: FASM unrolled scalar */
 bool g_use_asm_nasm = false;  /* -an: NASM AVX2 gather */
@@ -140,7 +171,13 @@ static inline void clr_bit(uint64_t *bs, int idx) { bs[idx >> 6] &= ~(1ULL << (i
 /* Scalar fallback */
 static inline int  test_bit_scalar(const uint64_t *bs, int idx) { return (bs[idx >> 6] >> (idx & 63)) & 1ULL; }
 
-/* AVX2: check 4 distances in parallel via gather + bitmask test. Returns 1 if ANY duplicate seen */
+/* ---------------------------------------------------------------------------
+ * test_any_dup_avx2 -- Check 4 distances in parallel using AVX2 gather.
+ *
+ * Loads 4 distance indices, gathers the corresponding 64-bit bitset words,
+ * tests the appropriate bit in each word, and OR-reduces the result.
+ * Returns 1 if ANY of the 4 distances already exists in the bitset.
+ * --------------------------------------------------------------------------- */
 static inline int test_any_dup_avx2(const uint64_t *bs, const int *dist4)
 {
 #if defined(__AVX2__)
@@ -164,7 +201,7 @@ static inline int test_any_dup_avx2(const uint64_t *bs, const int *dist4)
 #endif
 }
 
-/* Wrapper for 8 distances using two 4-distance calls */
+/* Wrapper: check 8 distances by calling the 4-distance function twice. */
 static inline int test_any_dup8_avx2(const uint64_t *bs, const int *dist8)
 {
 #if defined(__AVX2__)
@@ -176,52 +213,69 @@ static inline int test_any_dup8_avx2(const uint64_t *bs, const int *dist8)
 
 #define test_bit(bs, idx) test_bit_scalar((bs), (idx))
 
-/* Recursive branch&bound with distance bitset */
+/* ===========================================================================
+ * dfs -- Recursive branch-and-bound depth-first search.
+ *
+ * Places marks in ascending order (pos[0] < pos[1] < ... < pos[n-1]).
+ * For each candidate position `next`:
+ *   1. Compute all distances from `next` to previously placed marks.
+ *   2. If any distance already exists in the bitset -> prune (skip).
+ *   3. Otherwise commit (set bits), recurse, and rollback on failure.
+ *
+ * The final mark must land exactly at target_len for the ruler to be valid.
+ *
+ * Pruning strategies:
+ *   - Lower bound: if placing remaining marks 1 apart can't reach target_len,
+ *     prune immediately.
+ *   - Symmetry break: the second mark (depth==1) is limited to <= L/2.
+ *   - SIMD acceleration: when depth >= 8, distances are checked 8 at a time
+ *     using AVX2 gather (or ASM backend).
+ * =========================================================================== */
 bool dfs(int depth, int n, int target_len, int *pos, uint64_t *dist_bs, bool verbose)
 {
     if (depth == n)
     {
+        /* All n marks placed; valid iff the last mark equals L. */
         return pos[n - 1] == target_len;
     }
     int last = pos[depth - 1];
 
-    /* minimal possible final length if we place marks 1 apart */
+    /* Lower bound: even with minimum gaps of 1, can we still reach target_len? */
     if (last + (n - depth) > target_len)
         return false;
 
+    /* Upper bound for next mark: must leave room for (n-depth-1) more marks. */
     int max_next = target_len - (n - depth - 1);
     if (depth == 1)
     {
-        int limit = target_len / 2; /* symmetry break */
+        int limit = target_len / 2; /* Symmetry break: second mark <= L/2 */
         if (limit < last + 1)
-            limit = last + 1; /* ensure at least one candidate */
+            limit = last + 1;
         if (max_next > limit)
             max_next = limit;
     }
 
-    /* Pre-compute distances array to avoid recomputation */
-    int dists[MAX_MARKS];
+    int dists[MAX_MARKS]; /* Pre-computed distances for current candidate */
 
-    /* try next positions */
     for (int next = last + 1; next <= max_next; ++next)
     {
+        /* Quick scalar pre-check: the gap to the immediate predecessor
+         * is the most likely duplicate (smallest new distance). */
         int gap = next - last;
-        /* Fast pre-check: most likely duplicate is the newest smallest gap (next-last). */
         if (test_bit_scalar(dist_bs, gap))
             continue;
 
-        /* Compute all distances once and check for duplicates */
+        /* Compute all distances from `next` to every placed mark. */
         bool ok = true;
         for (int i = 0; i < depth; ++i)
             dists[i] = next - pos[i];
 
+        /* Check for duplicates: SIMD path (8 at a time) or scalar. */
         if (g_use_simd && depth >= 8) {
-            /* SIMD path: check 8 distances at a time */
             int i = 0;
             for (; i + 8 <= depth; i += 8) {
                 if (test_any_dup8(dist_bs, &dists[i])) { ok = false; break; }
             }
-            /* Check remaining distances */
             if (ok) {
                 for (; i < depth; ++i) {
                     if (test_bit_scalar(dist_bs, dists[i])) { ok = false; break; }
@@ -238,7 +292,7 @@ bool dfs(int depth, int n, int target_len, int *pos, uint64_t *dist_bs, bool ver
         if (!ok)
             continue;
 
-        /* commit - reuse precomputed distances */
+        /* Commit: place mark and set all new distance bits. */
         pos[depth] = next;
         for (int i = 0; i < depth; ++i)
             set_bit(dist_bs, dists[i]);
@@ -249,13 +303,19 @@ bool dfs(int depth, int n, int target_len, int *pos, uint64_t *dist_bs, bool ver
         if (dfs(depth + 1, n, target_len, pos, dist_bs, verbose))
             return true;
 
-        /* rollback - reuse precomputed distances */
+        /* Rollback: clear all distance bits set in this step. */
         for (int i = 0; i < depth; ++i)
             clr_bit(dist_bs, dists[i]);
     }
     return false;
 }
 
+/* ---------------------------------------------------------------------------
+ * solve_golomb -- Single-threaded entry point.
+ *
+ * Searches for a Golomb ruler with exactly n marks and length target_length.
+ * Returns true and fills `out` if found; false otherwise.
+ * --------------------------------------------------------------------------- */
 bool solve_golomb(int n, int target_length, ruler_t *out, bool verbose)
 {
     if (n > MAX_MARKS || target_length > MAX_LEN_BITSET)
@@ -273,9 +333,23 @@ bool solve_golomb(int n, int target_length, ruler_t *out, bool verbose)
     return true;
 }
 
-/* ----------------------------------------------------------------------
- * Multi-threaded top-level search (OpenMP)
- * --------------------------------------------------------------------*/
+/* ===========================================================================
+ * MULTI-THREADED STATIC SOLVER (-mp)
+ *
+ * Parallelization strategy:
+ *   1. Enumerate all valid (second, third) mark pairs.
+ *   2. Optionally sort them by proximity to the LUT reference pair
+ *      (candidates close to the known-optimal pair are tried first).
+ *   3. Try the exact LUT pair as a "fast lane" before parallel search.
+ *   4. Distribute candidates across threads via OpenMP taskloop.
+ *   5. Each thread runs an independent DFS from depth 3 onwards.
+ *   6. First thread to find a solution sets a shared flag; others stop.
+ *
+ * Checkpointing:
+ *   A bitset tracks which candidates have been processed. Periodically
+ *   flushed to disk (atomic file rename for crash safety). On resume,
+ *   already-processed candidates are skipped.
+ * =========================================================================== */
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -295,13 +369,17 @@ static int cand_cmp(const void *a, const void *b)
 }
 #endif
 
+/* ---------------------------------------------------------------------------
+ * solve_golomb_mt -- Static multi-threaded solver (OpenMP taskloop).
+ *
+ * For orders <= 3, delegates to single-threaded solver (overhead not worth it).
+ * --------------------------------------------------------------------------- */
 bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose)
 {
 #ifdef _OPENMP
     if (n > MAX_MARKS || target_length > MAX_LEN_BITSET)
         return false;
     init_avx512_flag();
-    /* Very small orders (<=3) are faster single-threaded */
     if (n <= 3)
     {
         return solve_golomb(n, target_length, out, verbose);
@@ -498,9 +576,16 @@ bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose)
 
 }
 
-/* ----------------------------------------------------------------------
- * Dynamic task-based OpenMP solver (finer workload balancing)
- * --------------------------------------------------------------------*/
+/* ===========================================================================
+ * DYNAMIC TASK SOLVER (-d)
+ *
+ * Uses OpenMP taskloop with cancellation for finer-grained load balancing.
+ * Each (second, third) pair becomes an independent task. When one task finds
+ * a solution, `omp cancel taskgroup` stops all remaining tasks.
+ *
+ * Trade-off: higher per-task overhead than -mp, but better load balancing
+ * when subtree sizes vary significantly. Requires OMP_CANCELLATION=TRUE.
+ * =========================================================================== */
 bool solve_golomb_mt_dyn(int n, int target_length,
                          ruler_t *out, bool verbose)
 {

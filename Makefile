@@ -1,12 +1,15 @@
 CC=gcc
 CFLAGS=-Wall -O3 -std=c99 -fopenmp -march=native -flto
-LDFLAGS=-Wl,-z,noexecstack
+LDFLAGS=-Wl,-z,noexecstack -lm
 PREFIX=bin
 SRCDIR=src
 INCDIR=include
 ASMDIR=$(SRCDIR)/asm
 
-SRC=$(SRCDIR)/main.c $(SRCDIR)/solver.c $(SRCDIR)/solver_mpa_harness.c $(SRCDIR)/lut.c $(SRCDIR)/solver_creative.c $(SRCDIR)/bench.c $(SRCDIR)/dup_avx2_gather.c $(SRCDIR)/dup_avx512.c
+SRC=$(SRCDIR)/main.c $(SRCDIR)/solver.c $(SRCDIR)/solver_mpa_harness.c $(SRCDIR)/lut.c \
+     $(SRCDIR)/solver_creative.c $(SRCDIR)/bench.c $(SRCDIR)/dup_avx2_gather.c \
+     $(SRCDIR)/dup_avx512.c $(SRCDIR)/solver_physics.c \
+     $(SRCDIR)/solver_evolution.c $(SRCDIR)/solver_traditional_opt.c
 
 # ASM sources: FASM (unrolled scalar -af), NASM (AVX2 gather -an)
 FASM_OBJ=$(ASMDIR)/dup_avx2_unrolled.o

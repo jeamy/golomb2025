@@ -1,0 +1,9 @@
+length=17
+marks=6
+positions=0 1 8 12 14 17
+distances=1 2 3 4 5 6 7 8 9 11 12 13 14 16 17
+missing=10 15
+seconds=0.022973
+time=0.023 s
+options=-p -v
+optimal=yes
