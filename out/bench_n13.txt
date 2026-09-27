@@ -1,0 +1,14 @@
+Flags	Seconds
+-mp	2.540
+-mp -b	2.621
+-mp -e	2.691
+-mp -af	2.418
+-mp -an	2.551
+-mp -e -af	2.904
+-mp -e -an	2.624
+-mp -b -af	2.418
+-mp -b -an	2.820
+-c	4.713
+-c -e	4.682
+-c -af	4.570
+-c -an	5.130

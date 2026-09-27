@@ -181,19 +181,29 @@ env GOLOMB_NO_HINTS=1 ./bin/golomb 14 -mp -f out/cp_n14_nohints.bin -fi 30
 ```
 
 golomb-2025/
-├── bin/              # compiled executable (`golomb`)
-├── out/              # generated result files
+├── bin/              # compiled executable (`golomb`, plus symlinks to the
+│                     #   Go/Rust binaries once their build scripts run)
+├── out/              # generated result files (out/GOL_n<n>_<opts>.txt, out/bench_n<n>.txt)
 ├── include/          # public headers
 │   └── golomb.h
 ├── src/              # C implementation
-│   ├── lut.c                  # built-in optimal rulers table & helpers
-│   ├── solver.c               # branch-and-bound solver (bitset, OpenMP)
-│   ├── solver_traditional_opt.c  # endpoint-aware DFS (-to)
-│   ├── solver_evolution.c     # iterated min-conflicts local search (-g)
-│   ├── solver_physics.c       # discrete simulated annealing (-p)
-│   ├── solver_creative.c      # hybrid work-stealing solver (-c)
-│   └── main.c                 # CLI / program entry
-├── test/             # benchmark and test programs
+│   ├── lut.c                     # built-in optimal rulers table & helpers
+│   ├── solver.c                  # branch-and-bound solver (bitset, OpenMP)
+│   ├── solver_traditional_opt.c  # endpoint-aware DFS (-to, and its -mp variant)
+│   ├── solver_evolution.c        # iterated min-conflicts local search (-g)
+│   ├── solver_physics.c          # discrete simulated annealing (-p)
+│   ├── solver_creative.c         # hybrid work-stealing solver (-c)
+│   ├── solver_mpa_harness.c      # OpenMP harness around the NASM DFS (-mpa)
+│   ├── solver_sat.c              # experimental SAT-based formulation
+│   ├── bench.c                   # built-in benchmark suite (-t)
+│   ├── asm/                      # FASM/NASM distance-check hot spots (-af/-an)
+│   └── main.c                    # CLI / program entry
+├── test/             # standalone benchmark/test programs (not the `-t` suite)
+├── script/           # checkpoint inspection tools (script/cpod, script/cppy)
+├── go/               # Go port (see go/README.md)
+├── rust/             # Rust port (see rust/README.md)
+├── java/             # Java port (see java/README.md)
+├── nvidia/           # CUDA variant (see nvidia/README.md)
 ├── Makefile
 ├── LICENSE
 └── README.md
@@ -216,43 +226,43 @@ The solver uses recursive backtracking with pruning:
 
 ### Sample Runtimes
 
-CPU Bench (2025-12-30). The per-run `out/GOL_n13_*.txt` / `out/bench_n13.txt`
-files cited below were removed in the 2026-09-27 GPU-focused cleanup
-(commit `d5688d0`); the numbers are kept here as historical reference.
+CPU Bench (2026-09-27, GTX 1660 Ti host / Ryzen 7 3700X, same machine as the
+CUDA benchmarks above), produced by `./bin/golomb 13 -t` / `./bin/golomb 14 -t`.
+All files referenced below are present in `out/`.
 
-| Flags | `seconds` | Output file (no longer present) |
-|-------|-----------|-------------|
-| `-mp` | 2.325 | `out/GOL_n13_mp.txt` |
-| `-mpa` | 3.517 | `out/GOL_n13_mpa.txt` |
-| `-mp -b` | 2.459 | `out/GOL_n13_mp_b.txt` |
-| `-mp -e` | 2.442 | `out/GOL_n13_mp_e.txt` |
-| `-mp -af` | 2.439 | `out/GOL_n13_mp_af.txt` |
-| `-mp -an` | 2.465 | `out/GOL_n13_mp_an.txt` |
-| `-mp -e -af` | 2.427 | `out/GOL_n13_mp_e_af.txt` |
-| `-mp -e -an` | 2.382 | `out/GOL_n13_mp_e_an.txt` |
-| `-mp -b -af` | 2.308 | `out/GOL_n13_mp_b_af.txt` |
-| `-mp -b -an` | 2.365 | `out/GOL_n13_mp_b_an.txt` |
+Sources
+- Summary TSV: `out/bench_n13.txt`, `out/bench_n14.txt`
+- Full per-run outputs: `out/GOL_n13_<flags>.txt`, `out/GOL_n14_<flags>.txt`
+
+| Flags | n=13 `seconds` | n=14 `seconds` |
+|-------|---------------:|---------------:|
+| `-mp` | 2.540 | 22.428 |
+| `-mp -b` | 2.621 | 22.414 |
+| `-mp -e` | 2.691 | 22.532 |
+| `-mp -af` | 2.418 | 20.841 |
+| `-mp -an` | 2.551 | 22.626 |
+| `-mp -e -af` | 2.904 | 20.964 |
+| `-mp -e -an` | 2.624 | 22.242 |
+| `-mp -b -af` | 2.418 | 20.679 |
+| `-mp -b -an` | 2.820 | 22.087 |
+| `-c` | 4.713 | 159.046 |
+| `-c -e` | 4.682 | 155.492 |
+| `-c -af` | 4.570 | 141.481 |
+| `-c -an` | 5.130 | 166.493 |
+| `-mpa` | 7.480 | 30.395 |
+
+`-mpa` (OpenMP harness in C + NASM DFS, `out/GOL_n13_mpa.txt` /
+`out/GOL_n14_mpa.txt`) isn't part of the `-t` suite above; run separately
+with `./bin/golomb <n> -mpa`.
 
 Quick observations
-- `-b` and `-e` have only a small impact for `n=13`.
-- `-af/-an` are correct (same `positions=` / `distances=` as `-mp`), but they are not faster here.
-
-#### Order n = 14
-
-CPU Bench (2025-12-30). The per-run `out/GOL_n14_mp*.txt` / `out/bench_n14.txt`
-files cited below were removed in the same cleanup as above.
-
-| Flags | `seconds` | Output file (no longer present) |
-|-------|-----------|-------------|
-| `-mp` | 21.342 | `out/GOL_n14_mp.txt` |
-| `-mp -b` | 21.664 | `out/GOL_n14_mp_b.txt` |
-| `-mp -e` | 22.027 | `out/GOL_n14_mp_e.txt` |
-| `-mp -af` | 21.061 | `out/GOL_n14_mp_af.txt` |
-| `-mp -an` | 20.645 | `out/GOL_n14_mp_an.txt` |
-| `-mp -e -af` | 21.017 | `out/GOL_n14_mp_e_af.txt` |
-| `-mp -e -an` | 21.133 | `out/GOL_n14_mp_e_an.txt` |
-| `-mp -b -af` | 20.950 | `out/GOL_n14_mp_b_af.txt` |
-| `-mp -b -an` | 21.386 | `out/GOL_n14_mp_b_an.txt` |
+- `-b` and `-e` have only a small impact on `-mp` at either `n`.
+- `-af/-an` are correct (same `positions=`/`distances=` as the corresponding
+  run without them) and give a small, inconsistent edge on `-mp`, but are not
+  a clear win.
+- `-c` (creative work-stealing solver) is competitive with `-mp` at n=13, but
+  clearly behind it at n=14 (~7x slower); its own `-af`/`-an` variants help
+  more there (`-c -af` is the fastest `-c` variant at both `n`).
 
 
 ### Benchmark suite variants
@@ -468,7 +478,7 @@ For more details, see the Java implementation's README in the `java/` directory.
 A Go implementation of the Golomb ruler search algorithm is available in the `go/` directory. This implementation is a port of the original C version with idiomatic Go features:
 
 - **Go 1.23 Support**: Uses modern Go features and idioms
-- **Goroutine-based Parallelism**: Multi-processing search using goroutines and contexts (`-mp` flag)
+- **Goroutine-based Parallelism**: endpoint-aware DFS (ported from the C `-to` solver) run by a `runtime.NumCPU()` worker pool over pre-enumerated prefixes (`-mp` flag)
 - **Built-in LUT**: Look-up table with known optimal rulers up to 28 marks
 - **Compatible Output Format**: Produces output files compatible with the C and Java versions
 
