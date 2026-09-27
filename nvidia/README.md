@@ -204,6 +204,7 @@ Time-to-first at the LUT length (`-b`), wall clock, median of 3 runs:
 | n=16 CUDA guided | `./nvidia/golomb_nv 16 -b -H` | 14–21 s | 0.5 s |
 | n=17 CUDA hybrid | `./nvidia/golomb_nv 17 -b` | no result after ~2 h (stopped) | 533 s (single run) |
 | n=17 CUDA guided | `./nvidia/golomb_nv 17 -b -H` | – | 0.6 s |
+| n=18 CUDA hybrid | `./nvidia/golomb_nv 18 -b` | not attempted | 1273 s (21:13, single run) |
 
 CPU reference (unchanged code, `out/` logs): `./bin/golomb 14 -mp -b`
 22–34 s, `./bin/golomb 15 -mp -b` 193 s, `./bin/golomb 16 -mp -b` 2396 s.
