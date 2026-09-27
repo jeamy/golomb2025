@@ -202,6 +202,8 @@ Time-to-first at the LUT length (`-b`), wall clock, median of 3 runs:
 | n=14 CUDA guided | `./nvidia/golomb_nv 14 -b -H` | 0.33 s | 0.24 s |
 | n=15 CUDA guided | `./nvidia/golomb_nv 15 -b -H` | 0.95 s | 0.35 s |
 | n=16 CUDA guided | `./nvidia/golomb_nv 16 -b -H` | 14–21 s | 0.5 s |
+| n=17 CUDA hybrid | `./nvidia/golomb_nv 17 -b` | no result after ~2 h (stopped) | 533 s (single run) |
+| n=17 CUDA guided | `./nvidia/golomb_nv 17 -b -H` | – | 0.6 s |
 
 CPU reference (unchanged code, `out/` logs): `./bin/golomb 14 -mp -b`
 22–34 s, `./bin/golomb 15 -mp -b` 193 s, `./bin/golomb 16 -mp -b` 2396 s.
@@ -369,7 +371,9 @@ GOLOMB_WARMUP=16384 GOLOMB_DFS3_HINT=1 GOLOMB_UWIN=24 GOLOMB_ASYNC_PREF=1 \
   ./nvidia/build_cuda_nv.sh 14 -b
 ```
 
-Note on timing: Avoid `-vt` for benchmark timing; the heartbeat join can skew the appended `seconds`.
+Note on timing: the heartbeat thread sleeps in 50 ms slices, so `-vt` no
+longer delays the exit or the logged `seconds` (before 2026-09-27 the join
+could add up to one full `-vt` interval).
 
 ## Troubleshooting
 

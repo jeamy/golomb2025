@@ -791,8 +791,15 @@ static void *heartbeat_thread(void *)
             else              fprintf(stderr, "[VT] %.3f s elapsed – current L=%d\n", seconds, L);
             fflush(stderr);
         }
-        struct timespec req = { (time_t)g_vt_sec, (long)((g_vt_sec - (time_t)g_vt_sec) * 1e9) };
-        nanosleep(&req, NULL);
+        /* Sleep in 50 ms slices so the join at exit returns promptly; one
+         * long nanosleep delayed the exit (and the logged seconds) by up
+         * to a whole -vt interval. */
+        double slept = 0.0;
+        while (!g_done && slept < g_vt_sec) {
+            struct timespec req = { 0, 50L * 1000L * 1000L };
+            nanosleep(&req, NULL);
+            slept += 0.05;
+        }
     }
     return NULL;
 }

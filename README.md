@@ -1,7 +1,8 @@
 ### Benchmarks (2026-09-27, GTX 1660 Ti + Ryzen 7 3700X)
 
 - CUDA, no hints: `./nvidia/golomb_nv 14 -b` → ≈ 0.5 s, `15 -b` → ≈ 5.7 s, `16 -b` → ≈ 1.2 s
-- CUDA, guided fast-lane: `./nvidia/golomb_nv 14|15|16 -b -H` → ≈ 0.24 / 0.25 / 0.5 s
+- CUDA, no hints: `./nvidia/golomb_nv 17 -b` → 533 s (8:53, single run)
+- CUDA, guided fast-lane: `./nvidia/golomb_nv 14|15|16|17 -b -H` → ≈ 0.24 / 0.25 / 0.5 / 0.6 s
 - CPU baseline, `-mp`: `./bin/golomb 14 -mp -b` → ≈ 22–34 s, `15 -mp -b` → ≈ 193 s, `16 -mp -b` → ≈ 2396 s
 
 Details and the algorithm description are in `nvidia/README.md`.
