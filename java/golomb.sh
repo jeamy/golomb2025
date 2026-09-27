@@ -74,7 +74,7 @@ echo "Running Golomb Ruler Finder with $* arguments..."
 # Check if -b flag is already present
 if [[ ! " $* " =~ " -b " ]]; then
     # Add -b flag to use best-known ruler length as starting point
-    $JAVA_HOME/bin/java --enable-preview -cp target/classes com.golomb.GolombMain "$@" -b
+    $JAVA_HOME/bin/java -cp target/classes com.golomb.GolombMain "$@" -b
 else
-    $JAVA_HOME/bin/java --enable-preview -cp target/classes com.golomb.GolombMain "$@"
+    $JAVA_HOME/bin/java -cp target/classes com.golomb.GolombMain "$@"
 fi

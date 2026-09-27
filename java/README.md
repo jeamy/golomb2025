@@ -1,6 +1,6 @@
-# Golomb Ruler Finder - Java 24 Edition
+# Golomb Ruler Finder - Java 25 Edition
 
-A Java 24 port of the optimal Golomb ruler finder with multi-processing support (`-mp`).
+A Java 25 port of the optimal Golomb ruler finder with multi-processing support (`-mp`).
 
 ## Overview
 
@@ -8,7 +8,7 @@ This is a modern Java implementation of the Golomb ruler search algorithm, porte
 
 ## Features
 
-- **Java 24 Support**: Uses modern Java features including records, pattern matching, and enhanced APIs
+- **Java 25 Support**: Uses modern Java features including records, pattern matching, and enhanced APIs
 - **Multi-threaded Search**: `availableProcessors()` worker threads pulling from a shared atomic cursor (`-mp`, the default — see Algorithm below)
 - **Built-in LUT**: Look-up table with known optimal rulers for verification
 - **Comprehensive Testing**: Full test suite with JUnit 5
@@ -17,7 +17,7 @@ This is a modern Java implementation of the Golomb ruler search algorithm, porte
 
 ## Requirements
 
-- **Java 24** (with preview features enabled)
+- **Java 25**
 - **Maven 3.8+**
 
 ## Build & Run
@@ -55,7 +55,7 @@ mvn exec:java -Dexec.args="5 -v -mp"
 # Run via classpath (no shade/assembly plugin is configured, so `mvn package`
 # does NOT produce an executable jar — running it with `java -jar` fails with
 # "no main manifest attribute"; confirmed by running it)
-java --enable-preview -cp target/classes com.golomb.GolombMain 5 -v -mp
+java -cp target/classes com.golomb.GolombMain 5 -v -mp
 
 # Or via the exec plugin
 mvn -q exec:java -Dexec.args="5 -v -mp"
@@ -64,7 +64,7 @@ mvn -q exec:java -Dexec.args="5 -v -mp"
 ## Usage
 
 ```bash
-java --enable-preview -cp target/classes com.golomb.GolombMain <marks> [options]
+java -cp target/classes com.golomb.GolombMain <marks> [options]
 ```
 
 ### Options
@@ -83,16 +83,16 @@ java --enable-preview -cp target/classes com.golomb.GolombMain <marks> [options]
 
 ```bash
 # Find optimal ruler with 5 marks
-java --enable-preview -cp target/classes com.golomb.GolombMain 5
+java -cp target/classes com.golomb.GolombMain 5
 
 # Verbose multi-threaded search for 8 marks
-java --enable-preview -cp target/classes com.golomb.GolombMain 8 -v -mp
+java -cp target/classes com.golomb.GolombMain 8 -v -mp
 
 # Use heuristic and save to file
-java --enable-preview -cp target/classes com.golomb.GolombMain 10 -b -o ruler10.txt
+java -cp target/classes com.golomb.GolombMain 10 -b -o ruler10.txt
 
 # Single-threaded with heartbeat every 2 minutes
-java --enable-preview -cp target/classes com.golomb.GolombMain 12 -s -vt 2
+java -cp target/classes com.golomb.GolombMain 12 -s -vt 2
 ```
 
 ## Architecture
@@ -142,7 +142,7 @@ worker immediately pull the next unclaimed candidate instead.
 
 ### Benchmarks (2026-09-27, same machine as the root README's CPU benchmarks; `-mp` is the default)
 
-`java --enable-preview -cp target/classes com.golomb.GolombMain <n> -b`, wall clock:
+`java -cp target/classes com.golomb.GolombMain <n> -b`, wall clock:
 
 | n | seconds |
 |---|---------|
@@ -229,6 +229,14 @@ All rulers in the LUT have been verified to be valid Golomb rulers with unique d
   (equally valid) positions the search itself found
 
 ### Recent Improvements (2026-09-27)
+- Upgraded from Java 24 to Java 25 (the current LTS) and dropped
+  `--enable-preview` everywhere (pom.xml, golomb.sh, docs): the codebase
+  never actually used any preview feature — `javac --release 24` (no
+  `--enable-preview`) already compiled it cleanly, confirmed by trying it.
+  Java 24 is a non-LTS release and has been out of Oracle/OpenJDK support
+  since Java 25 shipped in September 2025, so this wasn't just a version
+  bump; the project was targeting an already-unsupported release for no
+  functional reason.
 - Ported the C/CUDA endpoint-aware bit-parallel DFS (see Algorithm above);
   `-mp` now uses an explicit atomic-cursor worker pool instead of
   parallelizing over `positions[1]` alone. n=14 `-mp -b`: not run before

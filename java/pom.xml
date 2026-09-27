@@ -11,13 +11,13 @@
     <packaging>jar</packaging>
     
     <name>Golomb Ruler Finder</name>
-    <description>Java 24 port of optimal Golomb ruler finder</description>
-    
+    <description>Java 25 port of optimal Golomb ruler finder</description>
+
     <properties>
-        <maven.compiler.source>24</maven.compiler.source>
-        <maven.compiler.target>24</maven.compiler.target>
+        <maven.compiler.source>25</maven.compiler.source>
+        <maven.compiler.target>25</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <maven.compiler.release>24</maven.compiler.release>
+        <maven.compiler.release>25</maven.compiler.release>
     </properties>
     
     <dependencies>
@@ -36,31 +36,24 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.13.0</version>
                 <configuration>
-                    <source>24</source>
-                    <target>24</target>
-                    <release>24</release>
-                    <compilerArgs>
-                        <arg>--enable-preview</arg>
-                    </compilerArgs>
+                    <source>25</source>
+                    <target>25</target>
+                    <release>25</release>
                 </configuration>
             </plugin>
-            
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.2.5</version>
-                <configuration>
-                    <argLine>--enable-preview</argLine>
-                </configuration>
             </plugin>
-            
+
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>exec-maven-plugin</artifactId>
                 <version>3.1.1</version>
                 <configuration>
                     <mainClass>com.golomb.GolombMain</mainClass>
-                    <commandlineArgs>--enable-preview</commandlineArgs>
                 </configuration>
             </plugin>
         </plugins>
