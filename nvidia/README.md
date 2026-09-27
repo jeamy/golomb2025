@@ -237,6 +237,9 @@ Environment variables
 - `GOLOMB_TARGET_L=<L>`: search another length (testing / proofs).
 - `GOLOMB_NO_MIRROR=1`: disable the mirror symmetry cut.
 - `GOLOMB_NO_GPU_DFS=1`: CPU-only hybrid (GPU still builds the frontier).
+- `GOLOMB_NO_SIMD=1`: disable the AVX2 SIMD path in the CPU-side DFS fallback.
+- `GOLOMB_GUIDED_TARGET=<N>` (>=64): target subprefix count for the `-H`
+  guided fast-lane expansion (default 32768).
 - `GOLOMB_COUNT=1`: count every ruler instead of stopping at the first
   (GPU and CPU shares are printed).  Used to validate the device path: GPU
   totals equal the CPU-only totals exactly, e.g. n=9 L=159/160 (~2.5e10

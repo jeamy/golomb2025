@@ -46,7 +46,7 @@ The default flags are `-Wall -O3 -march=native -flto -fopenmp`.  No additional l
 | `-f <file>` | Enable checkpointing for `-mp` and save/resume progress to/from <file>. |
 | `-fi <sec>` | Checkpoint flush interval in seconds (default 60). |
 | `-T <num>` | Set number of OpenMP threads for parallel solvers (default: all available cores). Affects `-mp`, `-d`, `-c`, `-g`, `-p`. |
-| `--help`| Display this help message and exit. |
+| `--help`, `-h`| Display this help message and exit. |
 
 **Solver Types (DFS-based, exact)**
 | Flag | Description |
@@ -84,21 +84,21 @@ env OMP_NUM_THREADS=$(nproc) \
     ./bin/golomb <n> -mp -b
 ```
 - `-mp` provides the best scaling with low overhead.
-- `-b` skips unnötige Längen-Iterationen, indem nur die Startlänge aus der LUT genutzt wird. Es werden niemals Positionslisten aus der LUT kopiert.
-- SIMD ist standardmäßig aktiv (falls verfügbar); `-e` kann weggelassen werden.
+- `-b` skips unnecessary length iterations by using only the starting length from the LUT. LUT position lists are never copied.
+- SIMD is active by default (if available); `-e` can be omitted.
 
 * The solver writes results to `out/GOL_n<marks><suffix>.txt`, where `<suffix>` encodes the active flags (e.g. `_mp_b`, empty when run with no flags). See "Output file format" below.
 * The runtime in seconds is printed after completion.
 
 ### Environment variables
 
-- `GOLOMB_USE_AVX512=1` – erzwingt den AVX-512 Gather-Pfad (sonst wird AVX2 bevorzugt, falls verfügbar).
-- `GOLOMB_NO_HINTS` – deaktiviert LUT-basierte Heuristiken, sobald die Variable GESETZT ist (unabhängig vom Wert). Das heißt:
-  - Nicht gesetzt: Hints AN (falls eine LUT für `n` existiert).
-  - `GOLOMB_NO_HINTS=1`: Hints AUS.
-  - `GOLOMB_NO_HINTS=0`: Hints ebenfalls AUS (reine Präsenz genügt).
-  Wichtig für Checkpoints: Beim Resume muss die Kandidatenordnung identisch sein – also entweder Hints an beiden Läufen an oder an beiden aus.
-- OpenMP: Für reproduzierbares Scheduling ggf. `OMP_NUM_THREADS`, `OMP_PLACES=cores`, `OMP_PROC_BIND=close` setzen.
+- `GOLOMB_USE_AVX512=1` – forces the AVX-512 gather path (otherwise AVX2 is preferred, if available).
+- `GOLOMB_NO_HINTS` – disables LUT-based heuristics as soon as the variable is SET (regardless of its value). That means:
+  - Unset: hints ON (if a LUT exists for `n`).
+  - `GOLOMB_NO_HINTS=1`: hints OFF.
+  - `GOLOMB_NO_HINTS=0`: hints also OFF (mere presence is enough).
+  Important for checkpoints: on resume, the candidate ordering must be identical — so hints must be either on for both runs, or off for both runs.
+- OpenMP: for reproducible scheduling, set `OMP_NUM_THREADS`, `OMP_PLACES=cores`, `OMP_PROC_BIND=close` as needed.
 
 ### Output file format
 ```
@@ -124,55 +124,55 @@ Example:
 
 The static multi-threaded solver (`-mp`) supports minimal checkpointing to survive long runs or interruptions.
 
-- Enable with `-f <file>`: the solver will persist a bitset of processed top-level candidates (pairs `(second, third)`) to `<file>` periodically and am Ende eines kompletten Kandidaten-Passes für das aktuelle L.
+- Enable with `-f <file>`: the solver will persist a bitset of processed top-level candidates (pairs `(second, third)`) to `<file>` periodically and at the end of a complete candidate pass for the current L.
 - Resuming: rerun the exact same command (same `n`, same target length `L` implied by the loop, same solver `-mp`, and same hint ordering setting). The solver will skip already processed candidates and continue.
 - Deterministic ordering: the checkpoint is only valid if the candidate ordering is identical. Therefore, resuming requires that either LUT-based ordering is enabled on both runs, or disabled on both runs. You can force disable hints via `GOLOMB_NO_HINTS=1`.
 - File format: binary header (`"GRCP"`, version, `n`, `L`, total-candidate count, LUT-ref pair and a flag indicating whether hint ordering was used) followed by the bitset payload. The solver validates the header before resuming; mismatches are ignored and a fresh checkpoint is started.
 
-  Header-Felder (Little-Endian)
+  Header fields (little-endian)
 
-  - __`GRCP`__ (4 Bytes, ASCII): Magic zur Identifikation des Formats.
-  - __`version`__ (`uint32`): Formatversion, aktuell `1`. Andere Versionen werden abgewiesen (neuer Checkpoint wird begonnen).
-  - __`n`__ (`uint32`): Ordnung (Anzahl der Marken).
-  - __`L`__ (`uint32`): Ziel-Länge der aktuellen Runde.
-  - __`total`__ (`uint64`): Anzahl der Top-Level-Kandidatenpaare `(second, third)` für dieses `n`/`L`. Bestimmt die Bitset-Breite. Anzahl Payload-Wörter: `words = ceil(total / 32)`; Payload-Größe in Bytes: `4 * words`.
-  - __`hint_s`__, __`hint_t`__ (je `uint32`): Referenzpaar aus der LUT (`ref->pos[1]`, `ref->pos[2]`) zur Kandidaten-Priorisierung. `0` falls Hints deaktiviert oder keine LUT.
-  - __`hint_used`__ (`uint32`): `0` = Hints AUS, `1` = Hints AN (inkl. Fast-Lane-Versuch). Muss zwischen Lauf und Resume identisch sein.
+  - __`GRCP`__ (4 bytes, ASCII): magic identifying the format.
+  - __`version`__ (`uint32`): format version, currently `1`. Other versions are rejected (a fresh checkpoint is started).
+  - __`n`__ (`uint32`): order (number of marks).
+  - __`L`__ (`uint32`): target length of the current round.
+  - __`total`__ (`uint64`): number of top-level candidate pairs `(second, third)` for this `n`/`L`. Determines the bitset width. Number of payload words: `words = ceil(total / 32)`; payload size in bytes: `4 * words`.
+  - __`hint_s`__, __`hint_t`__ (each `uint32`): reference pair from the LUT (`ref->pos[1]`, `ref->pos[2]`) used for candidate prioritization. `0` if hints are disabled or no LUT exists.
+  - __`hint_used`__ (`uint32`): `0` = hints OFF, `1` = hints ON (including the fast-lane attempt). Must be identical between the run and its resume.
 
-  Payload (Bitset)
+  Payload (bitset)
 
-  - Folge von `uint32`-Wörtern (Little-Endian). Bit `i` gesetzt ⇒ Kandidat `i` vollständig abgearbeitet. Nicht gesetzte Bits ⇒ noch offen.
+  - Sequence of `uint32` words (little-endian). Bit `i` set ⇒ candidate `i` fully processed. Unset bits ⇒ still open.
 - Interval: default 60s. Override at runtime with `-fi <sec>`.
-- File lifetime: Die Datei wird NICHT automatisch gelöscht. Sie bleibt erhalten (auch bei erfolgreichem Abschluss). Ein erneuter Lauf mit demselben Pfad überschreibt sie.
-- Signals/Abbruch: Es gibt keinen Signal-Handler. Wenn du den Prozess vor einem periodischen Flush beendest (z. B. Ctrl+C bevor `-fi` Sekunden verstrichen sind), wird evtl. KEIN Checkpoint geschrieben. Für schnelle erste Sicherungen `-fi` verkleinern (z. B. `-fi 10`).
+- File lifetime: the file is NOT deleted automatically. It is kept (even after successful completion). A rerun with the same path overwrites it.
+- Signals/abort: there is no signal handler. If you kill the process before a periodic flush (e.g. Ctrl+C before `-fi` seconds have elapsed), NO checkpoint may be written. Lower `-fi` for faster initial saves (e.g. `-fi 10`).
 
-Beispiele
+Examples
 
 ```bash
-# Langer Lauf mit Checkpoint (mit Hints = Standard)
+# Long run with checkpoint (with hints = default)
 ./bin/golomb 14 -mp -f out/cp_n14.bin -fi 30
 
-# Resume (gleiche Flags und identische Umgebung für die Kandidatenordnung)
+# Resume (same flags and identical environment for the candidate ordering)
 ./bin/golomb 14 -mp -f out/cp_n14.bin -fi 30
 
-# Hints explizit abschalten (ordnet Kandidaten rein lexikographisch)
+# Explicitly disable hints (orders candidates purely lexicographically)
 env GOLOMB_NO_HINTS=1 ./bin/golomb 14 -mp -f out/cp_n14_nohints.bin -fi 30
 env GOLOMB_NO_HINTS=1 ./bin/golomb 14 -mp -f out/cp_n14_nohints.bin -fi 30
 ```
 
-### Checkpoint-Analyse-Skripte (`script/`)
+### Checkpoint analysis scripts (`script/`)
 
 * __`script/cpod`__
-  - Zeigt die Header-Bytes (erste 64 Bytes) des Checkpoints in Hex via `od` und die Dateigröße.
-  - Nutzung:
+  - Shows the header bytes (first 64 bytes) of the checkpoint in hex via `od`, plus the file size.
+  - Usage:
     ```bash
     script/cpod out/cp15_resume.bin
     ```
 
 * __`script/cppy`__
-  - Python-Parser für den Checkpoint: liest den Header (`GRCP`, version, `n`, `L`, `total`, `hint_s`, `hint_t`, `hint_used`), zählt gesetzte Bits in der Bitset-Payload und gibt den Fortschritt in Prozent aus.
-  - Annahmen: Little-Endian, 40-Byte-Header. Erfordert Python ≥ 3.8.
-  - Nutzung:
+  - Python parser for the checkpoint: reads the header (`GRCP`, version, `n`, `L`, `total`, `hint_s`, `hint_t`, `hint_used`), counts set bits in the bitset payload, and prints progress as a percentage.
+  - Assumptions: little-endian, 40-byte header. Requires Python ≥ 3.8.
+  - Usage:
     ```bash
     script/cppy out/cp15_resume.bin
     ```
@@ -206,9 +206,9 @@ The solver uses recursive backtracking with pruning:
 3. Use a lower‐bound heuristic: if even by spacing the remaining marks 1 apart the current tentative length cannot be met, prune.
 4. Apply symmetry-breaking: the second mark is limited to ≤ L/2, eliminating mirrored solutions.
 5. Parallelisation
-   - `-mp` – Parallelisierung über eine geordnete Kandidatenliste der Paare (second, third) mit OpenMP `parallel for` und `schedule(dynamic, 16)`. Falls eine LUT für `n` existiert, werden die Paare nach Nähe zum LUT-Paar `(ref->pos[1], ref->pos[2])` sortiert, sodass vielversprechende Kandidaten zuerst geprüft werden. Frühabbruch über gemeinsames Flag.
-   - `-mpa` – Option A: OpenMP-Harness in C (Kandidatenliste + LUT-Ordering + Taskloop), aber die eigentliche DFS/Backtracking-Logik läuft in NASM (`dfs_asm`).
-   - `-d`  – dynamic tasks: OpenMP tasks from 2nd mark downward for automatic work-stealing (erfordert `OMP_CANCELLATION=TRUE`).
+   - `-mp` – parallelizes over an ordered candidate list of pairs (second, third) using OpenMP `parallel for` with `schedule(dynamic, 16)`. If a LUT exists for `n`, the pairs are sorted by proximity to the LUT pair `(ref->pos[1], ref->pos[2])`, so promising candidates are checked first. Early exit via a shared flag.
+   - `-mpa` – option A: OpenMP harness in C (candidate list + LUT ordering + taskloop), but the actual DFS/backtracking logic runs in NASM (`dfs_asm`).
+   - `-d`  – dynamic tasks: OpenMP tasks from 2nd mark downward for automatic work-stealing (requires `OMP_CANCELLATION=TRUE`).
 
 ● **With LUT entry** – If an optimal length for the requested order exists in the LUT, the solver starts at that length and verifies the result: *Optimal ✅* or *Not optimal ❌*.
 
@@ -434,12 +434,13 @@ The flags `-v` (verbose), `-b` (heuristic start), and `-o <file>` (output file) 
 
 (Environment variables: see the "Environment variables" section above; `OMP_CANCELLATION=TRUE` is additionally recommended for the `-d` solver.)
 
-### Semantik von `-b`
-- `-b` nutzt nur die bekannte optimale Länge aus der LUT als Startlänge (Upper Bound). Es findet keinerlei Kopieren von LUT-Positionen statt. Die vollständige Lineal-Lösung wird stets durch die Suche konstruiert und validiert.
+### Semantics of `-b`
+- `-b` only uses the known optimal length from the LUT as a starting length (upper bound). No LUT positions are ever copied. The full ruler solution is always constructed and validated by the search itself.
 
 ## 6  Development Notes
-This project was developed using **Windsurf**, an advanced AI-powered development environment.  
-The entire codebase was programmed through pair-programming with **OpenAI o3**, making it a showcase of modern AI-assisted development.
+The original C implementation and this project's early history were developed using **Windsurf**, an advanced AI-powered development environment, through pair-programming with **OpenAI o3**.
+
+Later work — the Go, Java, and Rust ports, the CUDA/`nvidia/` variant, and ongoing maintenance — was developed with **Claude Code** (Anthropic).
 
 Visit Windsurf: <https://codeium.com/windsurf>
 

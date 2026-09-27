@@ -167,7 +167,7 @@ The LUT includes verified optimal rulers for marks 2-28, with lengths:
 - 6 marks: length 17 `[0, 1, 4, 10, 12, 17]`
 - 7 marks: length 25 `[0, 1, 4, 10, 18, 23, 25]`
 - 8 marks: length 34 `[0, 1, 4, 9, 15, 22, 32, 34]`
-- 9 marks: length 44 `[0, 1, 6, 10, 23, 26, 34, 41, 44]`
+- 9 marks: length 44 `[0, 1, 5, 12, 25, 27, 35, 41, 44]`
 - 10 marks: length 55 `[0, 1, 6, 10, 23, 26, 34, 41, 53, 55]`
 - 11 marks: length 72 `[0, 1, 4, 13, 28, 33, 47, 54, 64, 70, 72]`
 - And more...
