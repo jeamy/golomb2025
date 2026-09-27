@@ -11,16 +11,19 @@ the GPU drains the prefix list from the front, CPU OpenMP threads from the back.
 ## Quick start
 
 ```bash
-# Build and run n=14 with LUT start length (-b) and hinting (-H)
-./nvidia/build_cuda_nv.sh 15 -b -H
+# Build (CUDA 13.0 toolkit + runtime, gcc-15/g++-15 are the Makefile defaults)
+make -C nvidia
 
-# Just run the built binary with a 60s watchdog
-/usr/bin/time -f "WALL=%e" timeout 60s ./nvidia/golomb_nv 15 -b -H
+# Run n=15 from the LUT length, without and with hints
+./nvidia/golomb_nv 15 -b        # ~5.7 s on a GTX 1660 Ti
+./nvidia/golomb_nv 15 -b -H     # ~0.25 s
+
+# Or build + run via the helper script (writes nvidia/GOL_n<n>_cuda.txt)
+./nvidia/build_cuda_nv.sh 15 -b
 ```
 
-On a GTX 1660 Ti (sm_75) this completes well under 30s (example: WALL≈0.32s). Your timing will vary by GPU/CPU.
-
-Results are appended to `nvidia/GOL_n<n>_cuda.txt` and match the C variant format: `length`, `marks`, `positions`, `distances`, `missing`, `seconds`, `time`, `options`, and `optimal=yes` when applicable.
+The program writes `out/GOL_n<n>_nv.txt` (`_nv_H` with `-H`); the helper
+script additionally writes `nvidia/GOL_n<n>_cuda.txt`.  Both match the C variant format: `length`, `marks`, `positions`, `distances`, `missing`, `seconds`, `time`, `options`, and `optimal=yes` when applicable.
 
 ## Algorithm
 
@@ -187,7 +190,7 @@ re-validated on the host before it is printed.
   `-dh`, `-dw` affect only that path).  L > 255 uses the older per-thread
   kernels.  Allocation, launch and transfer failures are completed on the CPU.
 
-### Benchmarks (2026-09-27, GTX 1660 Ti + Ryzen 7 3700X, CUDA 13.0 + GCC 15)
+### Benchmarks (2026-09-27, GTX 1660 Ti + Ryzen 7 3700X, CUDA 13.0 toolkit + runtime, GCC 15)
 
 Time-to-first at the LUT length (`-b`), wall clock, median of 3 runs:
 
@@ -238,20 +241,27 @@ Environment variables
   and without the mirror cut.  The host DFS itself matches a naive
   brute-force count for n=4..11, L_opt..L_opt+4.
 
-Build: `make CC=gcc-15 HOSTCXX=g++-15` with CUDA 13.0 (nvcc rejects GCC 16).
-The SM count is read with `cudaDeviceGetAttribute`, because `cudaDeviceProp`
-differs between the 13.0 headers and the 12.9 runtime and reported 1 SM.
+Build: `make -C nvidia` (CUDA 13.0 toolkit and runtime, gcc-15/g++-15).
+The binary reports `Runtime=13000 Driver=13040` on this system.  Earlier
+builds compiled with 13.0 headers but linked the 12.9 cudart; that mix
+changes the `cudaDeviceProp` layout (it reported 1 SM).  The SM count is now
+read with `cudaDeviceGetAttribute`, which is layout-independent.
 
 ## Requirements
 
 - NVIDIA GPU with Compute Capability ≥ 7.5 (e.g., GTX 1660 Ti).
-- CUDA Toolkit 12.9 (tested) or 13.0 (headers fix CUDA 12.9 math prototypes).
-- Host compilers: GCC/G++ 13.4 for Toolkit 12.9 builds. GCC/G++ 14 are OK with Toolkit 13.0.
+- Driver with CUDA UMD ≥ 13.0 (tested: 615.71.09, CUDA UMD 13.4).
+- CUDA Toolkit 13.0 (default, tested 2026-09-27).  Toolkit 12.9 still works
+  via `build_cuda_12.9nv.sh` (needs the header patch below).
+- Host compilers: GCC/G++ 15 for Toolkit 13.0 (nvcc 13.0 rejects GCC 16);
+  GCC/G++ 13.4 for Toolkit 12.9.
+- Toolkit and runtime must be the same release (see Build note above).
 
-Environment variables respected by the script:
-- `CUDA_TOOLKIT` – toolkit root for `nvcc` (prepended to `PATH`).
-- `CUDA_RUNTIME_HOME` – runtime root providing `libcudart.so` (prepended to `LD_LIBRARY_PATH`).
-- `CC`, `HOSTCXX` – host C/C++ compilers; `HOSTCXX` is passed to nvcc via `-ccbin`.
+Environment variables respected by the Makefile and the script:
+- `CUDA_TOOLKIT` – toolkit root for `nvcc` (default `/usr/local/cuda`).
+- `CUDA_RUNTIME_HOME` – cudart root (default: same as `CUDA_TOOLKIT`).
+- `CC`, `HOSTCXX` – host C/C++ compilers (default `gcc-15`, `g++-15`);
+  `HOSTCXX` is passed to nvcc via `-ccbin`.
 
 The `nvidia/Makefile` embeds SASS and PTX:
 ```
@@ -297,24 +307,19 @@ sudo cp -a "$H.bak.<stamp>" "$H"
 ```
 
 ### Alternative (Option B)
-Compile with CUDA Toolkit 13.0 headers (already fixed), but link/load CUDA Runtime 12.9 to match the driver:
-```bash
-CUDA_TOOLKIT=/usr/local/cuda \
-CUDA_RUNTIME_HOME=/usr/local/cuda-12.9 \
-CC=gcc-14 HOSTCXX=g++-14 \
-./nvidia/build_cuda_nv.sh 15 -b
-```
-The `nvidia/Makefile` sets rpath to `$(CUDA_RUNTIME_HOME)/lib64`, so the chosen runtime is found at run time.
+Use CUDA Toolkit 13.0 for both compiling and linking (the default now; its
+headers are already fixed).  Do not combine 13.0 headers with the 12.9
+runtime: struct layouts differ between the releases.
 
 ## Build & Run
 
-Recommended via script (outputs `nvidia/GOL_n<n>_cuda.txt`):
+Recommended via script (CUDA 13.0 + gcc-15; outputs `nvidia/GOL_n<n>_cuda.txt`):
 ```bash
 ./nvidia/build_cuda_nv.sh 15 -b          # build and run from LUT start length
-./nvidia/build_cuda_nv.sh 16 -b -H       # enable LUT-based candidate ordering
+./nvidia/build_cuda_nv.sh 16 -b -H       # guided fast-lane under the LUT (s,t) pair
 ```
 
- Fixed 12.9 wrapper (exact env)
+ Fixed 12.9 wrapper (older, consistent 12.9 toolchain)
  ```bash
  # Uses Toolkit 12.9 + Runtime 12.9 and GCC/G++ 13.4 exactly as validated
  ./nvidia/build_cuda_12.9nv.sh 14 -b -H
@@ -331,12 +336,14 @@ Direct binary usage:
 
 Key options
 - `-b` – start at best-known optimal length from LUT (never copies positions).
-- `-H` – enable LUT hinting (candidate ordering) and a one-shot fast-lane attempt.
+- `-H` – guided fast-lane: search only the subtree under the LUT pair (m_1, m_2).
 - `-v` – verbose; diagnostics and heartbeats go to stderr (`[CUDA]`, `[VT]`).
 - `-f` / `-fi` – checkpoint path and flush interval.
 
 ### CLI reference and tuning (2025-08-10)
 
+These flags only affect the fallback root-prefilter path (checkpoint `-f`,
+no GPU, or failed frontier generation), not the default frontier search.
 Advanced flags for A/B tuning (with env var equivalents):
 
 - `-wu <N>` or `GOLOMB_WARMUP=<N>`
@@ -348,18 +355,18 @@ Advanced flags for A/B tuning (with env var equivalents):
 - `-ap` or `GOLOMB_ASYNC_PREF=1`
   - Run GPU prefilter asynchronously in a worker thread and overlap with warmup. Skipped when `-H` is set.
 
-Examples (CUDA 12.9 wrapper recommended):
+Examples:
 
 ```bash
 # Hints fast-lane (restored behavior):
-./nvidia/build_cuda_12.9nv.sh 14 -b -H
+./nvidia/build_cuda_nv.sh 14 -b -H
 
 # No hints, tuned for earlier hit probability:
-./nvidia/build_cuda_12.9nv.sh 14 -b -wu 16384 -dh -dw 24 -ap
+./nvidia/build_cuda_nv.sh 14 -b -wu 16384 -dh -dw 24 -ap
 
 # Using environment variables instead of flags:
 GOLOMB_WARMUP=16384 GOLOMB_DFS3_HINT=1 GOLOMB_UWIN=24 GOLOMB_ASYNC_PREF=1 \
-  ./nvidia/build_cuda_12.9nv.sh 14 -b
+  ./nvidia/build_cuda_nv.sh 14 -b
 ```
 
 Note on timing: Avoid `-vt` for benchmark timing; the heartbeat join can skew the appended `seconds`.
@@ -368,9 +375,11 @@ Note on timing: Avoid `-vt` for benchmark timing; the heartbeat join can skew th
 
 - Kernel launch error `device kernel image is invalid (200)`:
   - Ensure your GPU supports `sm_75` and that PTX fallback is present (see Makefile).
-  - Ensure `CUDA_RUNTIME_HOME` matches the installed driver version.
-  - Try compiling with the same-major Toolkit as your runtime/driver (e.g., Toolkit 12.9).
-- GCC/headers conflicts on Toolkit 12.9: apply the header patch above or build with Toolkit 13.0 while keeping Runtime 12.9.
+  - Use the same CUDA release for toolkit and runtime, and a driver whose
+    CUDA UMD version is at least that release.
+- `unsupported GNU version! gcc versions later than 15`: build with
+  `CC=gcc-15 HOSTCXX=g++-15` (Makefile default).
+- GCC/headers conflicts on Toolkit 12.9: apply the header patch above or build with Toolkit 13.0.
 
 ## License
 MIT, see top-level `LICENSE`.

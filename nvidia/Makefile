@@ -6,8 +6,11 @@ CUDA_TOOLKIT ?= $(CUDA_HOME)
 # Runtime to link/load (libcudart), can differ from toolkit
 CUDA_RUNTIME_HOME ?= $(CUDA_HOME)
 NVCC ?= $(CUDA_TOOLKIT)/bin/nvcc
-CC   ?= gcc
-HOSTCXX ?= g++
+# nvcc 13.0 accepts GCC <= 15 (the system default GCC 16 is rejected).
+ifeq ($(origin CC),default)
+CC := gcc-15
+endif
+HOSTCXX ?= g++-15
 CFLAGS := -O3 -Wall -std=c11 -I../include -march=native -mtune=native
 NVFLAGS := -O3 -std=c++17 \
     -D__GLIBC_USE_ISOC2X=0 -U_ISOC2X_SOURCE -U_ISOC23_SOURCE \

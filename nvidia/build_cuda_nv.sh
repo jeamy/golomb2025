@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build NVIDIA CUDA variant with a compiler toolkit and a (possibly different)
-# runtime that matches the installed NVIDIA driver. Defaults:
-#  - CUDA_TOOLKIT: /usr/local/cuda        (CUDA 13.0 on this system)
-#  - CUDA_RUNTIME_HOME: /usr/local/cuda-12.9 (matches driver CUDA 12.9)
-#  - CC: gcc-14
-#  - HOSTCXX: g++-14 (nvcc host C++ compiler via -ccbin)
+# Build NVIDIA CUDA variant.  Toolkit (nvcc + headers) and runtime (cudart)
+# must come from the same CUDA release: mixing 13.x headers with a 12.9
+# cudart changes struct layouts such as cudaDeviceProp.  The installed
+# driver (CUDA UMD 13.4) runs 13.0 binaries, so no older runtime is needed.
+# Defaults:
+#  - CUDA_TOOLKIT:      /usr/local/cuda (CUDA 13.0 on this system)
+#  - CUDA_RUNTIME_HOME: same as CUDA_TOOLKIT
+#  - CC / HOSTCXX:      gcc-15 / g++-15 (nvcc 13.0 rejects GCC 16)
 # You can override any via environment variables before calling this script.
 
 CUDA_TOOLKIT=${CUDA_TOOLKIT:-/usr/local/cuda}
-CUDA_RUNTIME_HOME=${CUDA_RUNTIME_HOME:-/usr/local/cuda-12.9}
-#CUDA_RUNTIME_HOME=/usr/local/cuda-12.9
-CC_BIN=${CC:-gcc-14}
-HOSTCXX_BIN=${HOSTCXX:-g++-14}
+CUDA_RUNTIME_HOME=${CUDA_RUNTIME_HOME:-$CUDA_TOOLKIT}
+CC_BIN=${CC:-gcc-15}
+HOSTCXX_BIN=${HOSTCXX:-g++-15}
 
 # Export and set search paths so nvcc (from Toolkit) and libcudart (from Runtime) are found.
 export CUDA_TOOLKIT CUDA_RUNTIME_HOME
