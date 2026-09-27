@@ -53,39 +53,43 @@ go build -o ../bin/golomb-go .
 
 ## Algorithm
 
-The Go implementation uses highly optimized backtracking to find optimal Golomb rulers:
+The search engine is a direct port of the C solver's endpoint-aware DFS
+(`src/solver_traditional_opt.c`, the `-to` solver) and the same technique
+used by the CUDA variant (`nvidia/golomb_bits.h`): both ruler endpoints
+(`0` and `L`) are fixed before any inner mark is placed, so every candidate
+mark is checked against the distance to the fixed right endpoint
+*immediately*, instead of only once all marks are placed. Used distances are
+tracked in a bitset (one bit per distance value) that is updated
+incrementally on descent and rolled back on backtrack — no per-node
+from-scratch re-validation.
 
-1. **Full Backtracking Search**: Always computes rulers through actual search rather than returning LUT rulers directly
-2. **Intelligent LUT Usage**: 
-   - Uses the LUT only for setting search bounds and output canonicalization
-   - With `-b` flag: Restricts search to the known optimal length from LUT
-   - Without `-b` flag: Performs full search from lower bound up to known optimal length
-   - Validates results against canonical optimal rulers from LUT
-3. **Advanced Pruning**: 
-   - Rejects partial solutions with duplicate distances using efficient bitset operations
-   - Early validation of ruler prefixes to quickly eliminate invalid branches
-   - Adaptive step sizing based on mark position to explore search space efficiently
-4. **Optimized Multi-processing**: 
-   - Fine-grained work distribution with task prioritization
-   - Context-aware worker cancellation when solution is found
-   - Worker-local data structures to eliminate contention
+1. **Full search, no shortcuts**: the ruler is always constructed by the DFS
+   itself; the LUT is only used for the search bounds (`-b`: search only the
+   known optimal length; without `-b`: search every length from a lower
+   bound up to the known optimal length) and, once an optimal-length ruler is
+   found with `-b`, to substitute the canonical LUT mark positions for the
+   (equally valid but not necessarily identical) ones the search found — the
+   same convention the C/Rust/Java ports use.
+2. **Endpoint-aware pruning**: for each candidate mark `next`, the distance
+   to the fixed endpoint `L - next` is checked before any other work; this
+   prunes branches that the plain left-to-right DFS would only reject much
+   deeper in the tree.
+3. **Symmetry breaking**: the first inner mark is limited to `<= L/2`
+   (mirror images are not searched twice).
+4. **Bitset distance tracking**: `[]uint64`, one bit per distance, updated
+   with a handful of set/clear operations per step instead of rescanning all
+   `O(depth^2)` pairs.
 
 ### Multi-processing (`-mp`)
 
-The `-mp` flag enables hocheffiziente Parallelverarbeitung durch:
-
-- **Fortschrittliche Arbeitsteilung**: 
-  - Aufteilung nach Positionen für Mark 1 und Mark 2 gleichzeitig
-  - Dynamische Anpassung der Aufgabengranularität nach Linealgröße
-  - Optimierte Verteilung von Arbeitseinheiten für gleichmäßige CPU-Auslastung
-- **Effiziente Synchronisation**:
-  - Sofortige Terminierung aller Worker mit context.Context, sobald eine Lösung gefunden wurde
-  - Minimale Synchronisationspunkte zur Vermeidung von Overhead
-  - Worker-lokale Bitsets zur Eliminierung von Contention
-- **Adaptive Parallelisierung**:
-  - Automatische Anpassung der Worker-Anzahl an verfügbare CPU-Kerne
-  - Feinkörnige Aufgabenplanung mit größerer Anzahl von Tasks als CPUs
-  - Priorisierte Ausführung vielversprechender Suchbereiche
+`-mp` mirrors `solve_golomb_traditional_opt_mt` in the C code: it enumerates
+every valid, distinct `(pos[1], pos[2])` prefix up front (same bounds and
+symmetry break as the single-threaded search) and hands them out over a
+buffered channel to a pool of `runtime.NumCPU()` goroutines. Each worker runs
+the identical endpoint-aware DFS from depth 3 with its own bitset and scratch
+buffer (no shared state, no lock contention); the first worker to find a
+ruler flips an atomic flag, and every other worker (and the producer) stops
+picking up new work.
 
 ## Output Format
 
@@ -125,19 +129,34 @@ All rulers in the LUT have been verified to be valid Golomb rulers with unique d
 - **Optimized Bitset**: Ultra-fast distance checking using uint64 arrays
 
 ### Performance Optimizations
-- **Bitset Implementation**: Replaced map-based distance checking with efficient bitset operations
-- **Universal Algorithm**: Single optimized algorithm that scales well for all ruler sizes
-- **Adaptive Step Sizing**: Dynamic step size adjustments based on mark position
-- **Early Validation**: Fast prefix validation to quickly reject invalid partial rulers
-- **Worker-Local Bitsets**: Each worker has its own bitset to eliminate contention
-- **Task Prioritization**: More promising search areas explored first
-- **Fine-grained Parallelism**: Search space split by both mark 1 and mark 2 positions
+- **Endpoint-aware DFS**: ported from `src/solver_traditional_opt.c` / `nvidia/golomb_bits.h` — see Algorithm above.
+- **Bitset distance tracking**: `[]uint64`, incremental set/clear instead of an `O(depth^2)` rescan per node.
+- **Worker-local state**: each `-mp` goroutine owns its bitset and scratch buffer; no shared mutable state, no lock contention.
+
+### Benchmarks (2026-09-27, same machine as the root README's CPU benchmarks)
+
+`./golomb <n> -b`, wall clock:
+
+| n | seconds |
+|---|---------|
+| 9 | 0.0002 |
+| 10 | 0.002 |
+| 11 | 0.015 |
+| 12 | 0.80 |
+| 13 | 12.4 |
+| 14 (`-mp`) | 57.2 |
+
+For reference, the previous (pre-2026-09-27) backtracking implementation
+took ~19.4 s for n=12 single-threaded and did not finish n=12 `-mp` within
+120 s; the endpoint-aware DFS is roughly 24x faster single-threaded at
+n=12 alone, before parallelism.
 
 ### Compared to C Implementation
-- **Startup Time**: Slightly faster startup due to no compilation step
-- **Memory Usage**: Higher but well-controlled memory usage 
-- **Single-threaded**: Comparable performance to C for most problems
-- **Multi-threaded**: Excellent scaling with multiple cores (12-mark ruler in ~15s)
+- **Same algorithm, different constant factor**: `./golomb 14 -mp -b` is
+  ~57 s here vs. ~22 s for `../bin/golomb 14 -mp -b` (root README, same
+  machine) — expect roughly 2-3x C's wall time at this `n`.
+- **Startup Time**: Slightly faster startup due to no compilation step.
+- **Memory Safety**: Automatic garbage collection, no manual memory management.
 
 ## Comparing with C Implementation
 
