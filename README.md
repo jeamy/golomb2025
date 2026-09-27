@@ -13,7 +13,7 @@ Details and the algorithm description are in `nvidia/README.md`.
 A small C command-line utility that searches for **optimal Golomb rulers** of a given order (number of marks) and verifies them against a built-in look-up table (LUT).
 
 ## 1  Background
-A *Golomb ruler* is a set of integer marks where every pair of marks defines a unique distance. The length of the ruler is the position of the last mark. A ruler is *optimal* if, for its number of marks `n`, no shorter ruler exists. See `doc/` or [Wikipedia](https://en.wikipedia.org/wiki/Golomb_ruler) for further details.
+A *Golomb ruler* is a set of integer marks where every pair of marks defines a unique distance. The length of the ruler is the position of the last mark. A ruler is *optimal* if, for its number of marks `n`, no shorter ruler exists. See [Wikipedia](https://en.wikipedia.org/wiki/Golomb_ruler) for further details.
 
 ## 2  Build & Requirements
 ```bash
@@ -51,9 +51,10 @@ The default flags are `-Wall -O3 -march=native -flto -fopenmp`.  No additional l
 **Solver Types (DFS-based, exact)**
 | Flag | Description |
 |------|-------------|
-| `-s` | Force single-threaded execution (highest priority). |
+| `-s` | Force single-threaded execution (overrides `-c`/`-d`/`-mpa`/`-mp` only; see solver priority below). |
 | `-c` | Use creative solver. |
 | `-d` | Use dynamic task-based solver. |
+| `-mpa`| NASM-assembler solver with LUT fast-lane and OpenMP harness (no checkpointing). |
 | `-mp`| Use multi-processing solver (static split, lowest priority). |
 | `-to`| Traditional optimized solver (endpoint-aware DFS). Implies `-b`; combine with `-mp` for parallel prefix search. |
 
@@ -86,7 +87,7 @@ env OMP_NUM_THREADS=$(nproc) \
 - `-b` skips unnötige Längen-Iterationen, indem nur die Startlänge aus der LUT genutzt wird. Es werden niemals Positionslisten aus der LUT kopiert.
 - SIMD ist standardmäßig aktiv (falls verfügbar); `-e` kann weggelassen werden.
 
-* The solver writes results to `out/GOL_n<marks>.txt`.  See “Output file format” below.
+* The solver writes results to `out/GOL_n<marks><suffix>.txt`, where `<suffix>` encodes the active flags (e.g. `_mp_b`, empty when run with no flags). See "Output file format" below.
 * The runtime in seconds is printed after completion.
 
 ### Environment variables
@@ -157,6 +158,7 @@ Beispiele
 # Hints explizit abschalten (ordnet Kandidaten rein lexikographisch)
 env GOLOMB_NO_HINTS=1 ./bin/golomb 14 -mp -f out/cp_n14_nohints.bin -fi 30
 env GOLOMB_NO_HINTS=1 ./bin/golomb 14 -mp -f out/cp_n14_nohints.bin -fi 30
+```
 
 ### Checkpoint-Analyse-Skripte (`script/`)
 
@@ -214,13 +216,11 @@ The solver uses recursive backtracking with pruning:
 
 ### Sample Runtimes
 
-CPU Bench (2025-12-30)
+CPU Bench (2025-12-30). The per-run `out/GOL_n13_*.txt` / `out/bench_n13.txt`
+files cited below were removed in the 2026-09-27 GPU-focused cleanup
+(commit `d5688d0`); the numbers are kept here as historical reference.
 
-Sources
-- Summary TSV: `out/bench_n13.txt`
-- Full per-run outputs: `out/GOL_n13_*.txt`
-
-| Flags | `seconds` | Output file |
+| Flags | `seconds` | Output file (no longer present) |
 |-------|-----------|-------------|
 | `-mp` | 2.325 | `out/GOL_n13_mp.txt` |
 | `-mpa` | 3.517 | `out/GOL_n13_mpa.txt` |
@@ -237,15 +237,12 @@ Quick observations
 - `-b` and `-e` have only a small impact for `n=13`.
 - `-af/-an` are correct (same `positions=` / `distances=` as `-mp`), but they are not faster here.
 
-#### Order n = 14 (bench run 2025-07-06)
+#### Order n = 14
 
-CPU Bench (2025-12-30)
+CPU Bench (2025-12-30). The per-run `out/GOL_n14_mp*.txt` / `out/bench_n14.txt`
+files cited below were removed in the same cleanup as above.
 
-Sources
-- Summary TSV: `out/bench_n14.txt`
-- Full per-run outputs: `out/GOL_n14_*.txt`
-
-| Flags | `seconds` | Output file |
+| Flags | `seconds` | Output file (no longer present) |
 |-------|-----------|-------------|
 | `-mp` | 21.342 | `out/GOL_n14_mp.txt` |
 | `-mp -b` | 21.664 | `out/GOL_n14_mp_b.txt` |
@@ -320,7 +317,7 @@ For example, if both `-mp` and `-g` are used, the `-g` flag takes precedence.
 | `-mp` | Static multi-threaded solver | OpenMP `parallel for` (fixed chunks) | Splits the first decision level evenly among threads once; minimal overhead, excellent cache locality.
 | `-d` | Dynamic task solver | OpenMP tasks (recursive) | Each recursive call can spawn a task; uses `OMP_CANCELLATION` so threads that finish early can cancel siblings once a solution is found. Offers perfect load balancing but high task-management overhead.
 | `-c` | Creative solver | Custom hybrid work-stealing pool | Starts with a static top-level split like `-mp`, then dynamically re-balances deeper nodes via a lock-free work queue. Adaptive granularity heuristics keep the task count low while preventing idle threads.
-| `-to` | Traditional optimized | none | Endpoint-aware DFS that fixes the right endpoint L from the start and prunes distances to L immediately. 3–4× faster than `-s` for same search space.
+| `-to` | Traditional optimized | none (single-threaded); parallel prefix search when combined with `-mp` | Endpoint-aware DFS that fixes the right endpoint L from the start and prunes distances to L immediately. 3–4× faster than `-s` for same search space.
 | `-g` | Evolutionary (Min-Conflicts) | none | Iterated local search: randomly place marks, then repeatedly move the most conflicting mark to its best position. Restarts with optional crossover from best-seen solution. Runs until solution found.
 | `-p` | Physics (Simulated Annealing) | none | Discrete SA over integer positions with conflict-oriented neighborhood: selects a conflicting mark, samples k random positions, accepts best via Metropolis criterion. Runs until solution found.
 
@@ -435,12 +432,7 @@ The flags `-v` (verbose), `-b` (heuristic start), and `-o <file>` (output file) 
 * Static split (`-mp`) has the lowest overhead and scales ~linear with cores.
 * Dynamic tasks (`-d`) are only worthwhile with OpenMP 5 cancellation enabled.
 
-### Environment variables
-
-- `GOLOMB_USE_AVX512=1` – Erzwingt die AVX-512-Variante für den Distanz-Duplikat-Test (standardmäßig wird AVX2 bevorzugt).
-- `GOLOMB_NO_HINTS=1` – Deaktiviert die LUT-gestützte Priorisierung der Kandidatenpaare `(second, third)` und den einmaligen Fast-Lane-Versuch mit dem LUT-Paar. Korrektheit bleibt unverändert.
-- `OMP_NUM_THREADS`, `OMP_PLACES`, `OMP_PROC_BIND` – Kontrolle der Thread-Anzahl und Bindung.
-- `OMP_CANCELLATION=TRUE` – empfohlen für den `-d` Solver (nicht erforderlich für `-mp`).
+(Environment variables: see the "Environment variables" section above; `OMP_CANCELLATION=TRUE` is additionally recommended for the `-d` solver.)
 
 ### Semantik von `-b`
 - `-b` nutzt nur die bekannte optimale Länge aus der LUT als Startlänge (Upper Bound). Es findet keinerlei Kopieren von LUT-Positionen statt. Die vollständige Lineal-Lösung wird stets durch die Suche konstruiert und validiert.
@@ -483,7 +475,7 @@ To build and run the Go implementation:
 
 ```bash
 cd go
-./build.sh      # Builds the binary and creates a symlink in ../bin/
+./build.sh      # Builds ../bin/golomb-go and creates a `golomb` symlink to it here
 ./golomb 5 -v -b -mp
 ```
 
@@ -503,7 +495,7 @@ A Rust implementation of the Golomb ruler search algorithm is available in the `
 - **Rust 1.70+ Support**: Uses modern Rust features and zero-cost abstractions
 - **Rayon-based Parallelism**: Multi-processing search using Rayon's work-stealing thread pool (`--mp` flag)
 - **Built-in LUT**: Look-up table with known optimal ruler lengths for all marks 1-28
-- **Compatible Output Format**: Produces output files compatible with the C, Java, Go, and Ruby versions
+- **Compatible Output Format**: Produces output files compatible with the C, Java, and Go versions
 
 To build and run the Rust implementation:
 
