@@ -3,8 +3,18 @@
 # golomb.sh - Script to run the Java Golomb Ruler Finder
 # Usage: ./golomb.sh <marks> [options]
 
-# Set Java home to Java 24 installation
-JAVA_HOME=~/programming/java24
+# Use JAVA_HOME if already set (e.g. by the caller); otherwise fall back to
+# whatever `java` is on PATH. The previous hardcoded
+# JAVA_HOME=~/programming/java24 only existed on the original author's
+# machine and silently broke this script everywhere else.
+if [ -z "$JAVA_HOME" ]; then
+    JAVA_BIN="$(command -v java)"
+    if [ -z "$JAVA_BIN" ]; then
+        echo "Error: no JAVA_HOME set and no 'java' found on PATH." >&2
+        exit 1
+    fi
+    JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$JAVA_BIN")")")"
+fi
 export JAVA_HOME
 
 # Check if at least one argument is provided

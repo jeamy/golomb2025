@@ -459,7 +459,7 @@ Visit Windsurf: <https://codeium.com/windsurf>
 A modern Java implementation of the Golomb ruler search algorithm is available in the `java/` directory. This implementation is a port of the original C version and includes the following features:
 
 - **Java 24 Support**: Uses modern Java features including records, pattern matching, and enhanced APIs
-- **Multi-threaded Search**: Parallel processing with Fork-Join framework (`-mp` flag)
+- **Multi-threaded Search**: endpoint-aware DFS (ported from the C `-to` solver) run by an `availableProcessors()` worker pool pulling from a shared atomic cursor over pre-enumerated prefixes (`-mp`, the default)
 - **Built-in LUT**: Look-up table with known optimal rulers for verification
 - **Comprehensive Testing**: Full test suite with JUnit 5
 
