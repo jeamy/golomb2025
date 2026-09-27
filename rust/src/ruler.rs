@@ -19,6 +19,7 @@ impl GolombRuler {
     
     /// Creates a new empty Golomb ruler with a specified number of marks
     /// The first mark is always at position 0
+    #[allow(dead_code)]
     pub fn empty(marks: usize) -> Self {
         let mut positions = Vec::with_capacity(marks);
         positions.push(0); // First mark is always at 0
@@ -46,6 +47,7 @@ impl GolombRuler {
     }
     
     /// Adds a new mark at the specified position
+    #[allow(dead_code)]
     pub fn add_mark(&mut self, position: usize) {
         debug_assert!(self.positions.len() < self.marks, "Cannot add more marks than specified");
         debug_assert!(
@@ -56,13 +58,15 @@ impl GolombRuler {
     }
     
     /// Removes the last mark
+    #[allow(dead_code)]
     pub fn remove_last_mark(&mut self) {
         if !self.positions.is_empty() {
             self.positions.pop();
         }
     }
-    
+
     /// Returns the current number of marks on the ruler
+    #[allow(dead_code)]
     pub fn current_marks(&self) -> usize {
         self.positions.len()
     }

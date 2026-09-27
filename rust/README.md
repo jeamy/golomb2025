@@ -1,6 +1,6 @@
 # Golomb Ruler Finder - Rust Implementation
 
-Eine Rust-Implementation des Golomb-Ruler-Finders, die kompatibel mit den C-, Java-, Go- und Ruby-Versionen ist.
+Eine Rust-Implementation des Golomb-Ruler-Finders, die kompatibel mit den C-, Java- und Go-Versionen ist.
 
 ## Überblick
 
@@ -49,31 +49,54 @@ chmod +x build.sh
 | Flag | Beschreibung |
 |------|-------------|
 | `-v, --verbose` | Verbose-Modus (gibt Zwischenschritte aus) |
-| `-m, --mp` | Multi-Processing verwenden |
+| `--mp` | Multi-Processing verwenden (kein Kurzflag; `-mp` wird von clap als `-m -p` interpretiert und schlägt fehl) |
 | `-b, --best` | Verwende bekannte optimale Länge als Obergrenze für die Suche |
 | `-o, --output <datei>` | Ausgabe in eine spezifische Datei schreiben |
 
 ## Algorithmus
 
-Der Algorithmus verwendet Backtracking mit Pruning:
+Die Such-Engine ist ein direkter Port des endpoint-aware DFS aus der
+C-Implementierung (`src/solver_traditional_opt.c`, der `-to`-Solver) und
+derselben Technik, die auch die CUDA-Variante nutzt (`nvidia/golomb_bits.h`):
+beide Linealenden (`0` und `L`) werden fixiert, bevor eine innere Markierung
+gesetzt wird, sodass die Distanz zum fixen rechten Endpunkt sofort geprüft
+wird — statt erst, wenn alle Markierungen platziert sind. Belegte Distanzen
+werden in einem Bitset (ein Bit pro Distanzwert) verfolgt, das beim
+Absteigen inkrementell gesetzt und beim Backtracking zurückgerollt wird,
+statt bei jedem Knoten neu berechnet zu werden (die vorherige Version
+klonte dafür bei jedem Kandidaten den kompletten Distanz-Set).
 
-1. Markierungen werden immer in aufsteigender Reihenfolge hinzugefügt
-2. Eine partielle Lösung wird sofort verworfen, wenn eine doppelte Distanz auftritt
-3. Eine bitset-basierte Distanzprüfung für optimale Performance
-4. Für Multi-Processing wird der Suchraum in Aufgaben aufgeteilt, die durch unterschiedliche Positionen für die ersten beiden Markierungen definiert sind
+1. Markierungen werden immer in aufsteigender Reihenfolge hinzugefügt.
+2. **Endpoint-aware Pruning**: für jede Kandidatenposition `next` wird die
+   Distanz zum fixen Endpunkt `L - next` geprüft, bevor irgendetwas anderes
+   passiert — das schneidet Teilbäume viel früher ab als das klassische
+   linksbündige Backtracking.
+3. **Symmetriebrechung**: die erste innere Markierung ist auf `<= L/2`
+   begrenzt (Spiegelbilder werden nicht doppelt durchsucht).
+4. **Bitset-Distanzverfolgung**: `Vec<u64>`, ein Bit pro Distanz,
+   inkrementell gesetzt/gelöscht statt bei jedem Knoten neu berechnet.
 
 ## Multi-Processing
 
-Die Multi-Processing-Option (`-mp`) nutzt die Rayon-Bibliothek für parallele Verarbeitung:
+`--mp` spiegelt `solve_golomb_traditional_opt_mt` aus dem C-Code: alle
+gültigen, verschiedenen `(pos[1], pos[2])`-Präfixe werden vorab vollständig
+aufgezählt (gleiche Grenzen und Symmetriebrechung wie bei der
+Einzelthread-Suche) und über Rayons `par_iter().find_map_any(...)` verteilt.
 
-1. Der Suchraum wird in Aufgaben aufgeteilt, basierend auf den Positionen der ersten beiden Markierungen
-2. Die Anzahl der Threads wird automatisch an die verfügbaren CPU-Kerne angepasst
-3. Ein gemeinsam genutztes Mutex ermöglicht frühe Terminierung, sobald eine Lösung gefunden wurde
-4. Die Arbeitslast wird dynamisch angepasst, um eine gleichmäßige Verteilung zu gewährleisten
+1. Jeder Präfix läuft als eigenständige Aufgabe mit eigenem Bitset und
+   Scratch-Buffer — kein gemeinsamer veränderlicher Zustand, keine Locks im
+   heißen Pfad.
+2. Ein `AtomicBool` signalisiert allen Workern, sobald ein Treffer
+   gefunden wurde; `find_map_any` bricht die Iteration ab, sobald ein
+   `Some` zurückkommt.
+3. Der Fortschrittszähler (`States searched`) wird pro Kandidat einmal
+   atomar addiert statt pro DFS-Knoten — das vermeidet Cache-Line-Konkurrenz
+   zwischen Threads und war bei n=14 für einen 2x-Speedup verantwortlich
+   (63,7 s → 31,7 s).
 
 ## Ausgabeformat
 
-Die Ausgabe ist kompatibel mit den C-, Java-, Go- und Ruby-Versionen:
+Die Ausgabe ist kompatibel mit den C-, Java- und Go-Versionen:
 
 ```
 length=<letzte-Markierung>
@@ -92,9 +115,29 @@ optimal=<yes|no>   # nur wenn ein Referenzlineal existiert
 Die Rust-Implementation bietet:
 
 - Sehr schnelle Ausführung durch Zero-Cost-Abstraktionen von Rust
-- Effiziente Speichernutzung mit kompakten Datenstrukturen
+- Effiziente Speichernutzung mit kompakten Datenstrukturen (Bitset statt Klonen des Distanz-Sets)
 - Hervorragende Parallelisierung durch Rayons Work-Stealing-Algorithmus
 - Native Binaries ohne externe Abhängigkeiten
+
+### Benchmarks (2026-09-27, gleiche Maschine wie die Root-README-Benchmarks)
+
+`./target/release/golomb <n> -b`, Wall-Clock:
+
+| n | Sekunden |
+|---|----------|
+| 9 | 0,0003 |
+| 10 | 0,002 |
+| 11 | 0,012 |
+| 12 | 0,76 |
+| 13 | 12,2 |
+| 14 (`--mp`) | 31,7 |
+
+Zum Vergleich: die vorherige (linksbündige, pro Knoten klonende)
+Implementierung brauchte bereits für n=12 spürbar länger und wurde für
+`--mp` bei größerem `n` durch eine unvollständige Aufgaben-Enumeration
+(`generate_tasks`) sogar zum Korrektheitsrisiko — dieselbe Klasse Bug wie
+der jetzt behobene Go-Solver, nur dass hier zusätzlich nicht jedes
+`(mark1, mark2)`-Präfix abgedeckt war.
 
 ## Architektur
 
