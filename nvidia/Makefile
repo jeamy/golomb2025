@@ -20,7 +20,7 @@ LDFLAGS := -lgomp -lpthread
 BIN_DIR := ./
 BIN := $(BIN_DIR)/golomb_nv
 
-OBJS_HOST := ../src/lut.o ../src/solver.o
+OBJS_HOST := host_lut.o host_solver.o host_traditional.o
 OBJS_CUDA := golomb_nv.o
 
 all: $(BIN)
@@ -28,13 +28,16 @@ all: $(BIN)
 $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
 
-../src/lut.o: ../src/lut.c ../include/golomb.h
+host_lut.o: ../src/lut.c ../include/golomb.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-../src/solver.o: ../src/solver.c ../include/golomb.h
+host_solver.o: ../src/solver.c ../include/golomb.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-%.o: %.cu ../include/golomb.h
+host_traditional.o: ../src/solver_traditional_opt.c ../include/golomb.h
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+%.o: %.cu golomb_bits.h ../include/golomb.h
 	$(NVCC) $(NVFLAGS) -c -o $@ $<
 
 $(BIN): $(BIN_DIR) $(OBJS_HOST) $(OBJS_CUDA)
