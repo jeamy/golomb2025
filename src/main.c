@@ -56,6 +56,7 @@ static void print_help(const char *prog_name)
     printf("  -p                 Use physics-based solver (Simulated Annealing). Implies -b.\n");
     printf("  -g                 Use evolutionary/genetic solver (Min-Conflicts). Implies -b.\n");
     printf("  -to                Use traditional optimized solver (endpoint-aware DFS). Implies -b.\n");
+    printf("                      Combine with -mp for endpoint-aware prefix parallelism.\n");
     printf("  -b                 Use best-known ruler length as a starting point heuristic.\n");
     printf("  -e                 Enable SIMD (AVX2) optimizations where available.\n");
     printf("  -af                Use FASM assembler (unrolled scalar).\n");
@@ -75,7 +76,8 @@ static double g_vt_sec = 0.0;
 
 /* Solver dispatch helper to avoid code duplication */
 typedef enum { SOLVER_SINGLE, SOLVER_MP, SOLVER_MPA, SOLVER_DYN, SOLVER_CREATIVE, 
-               SOLVER_PHYSICS, SOLVER_EVOLUTIONARY, SOLVER_TRAD_OPT } solver_type_t;
+               SOLVER_PHYSICS, SOLVER_EVOLUTIONARY, SOLVER_TRAD_OPT,
+               SOLVER_TRAD_OPT_MT } solver_type_t;
 
 /* Solver dispatch helper including ASM -mpa */
 static bool run_solver(solver_type_t type, int n, int L, ruler_t *result, bool verbose)
@@ -84,6 +86,7 @@ static bool run_solver(solver_type_t type, int n, int L, ruler_t *result, bool v
     extern bool solve_golomb_physics(int, int, ruler_t*, bool);
     extern bool solve_golomb_evolutionary(int, int, ruler_t*, bool);
     extern bool solve_golomb_traditional_opt(int, int, ruler_t*, bool);
+    extern bool solve_golomb_traditional_opt_mt(int, int, ruler_t*, bool);
     switch (type) {
         case SOLVER_CREATIVE:     return solve_golomb_creative(n, L, result, verbose);
         case SOLVER_DYN:          return solve_golomb_mt_dyn(n, L, result, verbose);
@@ -92,6 +95,7 @@ static bool run_solver(solver_type_t type, int n, int L, ruler_t *result, bool v
         case SOLVER_PHYSICS:      return solve_golomb_physics(n, L, result, verbose);
         case SOLVER_EVOLUTIONARY: return solve_golomb_evolutionary(n, L, result, verbose);
         case SOLVER_TRAD_OPT:     return solve_golomb_traditional_opt(n, L, result, verbose);
+        case SOLVER_TRAD_OPT_MT:  return solve_golomb_traditional_opt_mt(n, L, result, verbose);
         case SOLVER_SINGLE:       return solve_golomb(n, L, result, verbose);
         default: return false;
     }
@@ -354,7 +358,7 @@ extern int test_any_dup8_avx2_nasm(const uint64_t *, const int *) __attribute__(
     solver_type_t solver_type = SOLVER_SINGLE;
     if (use_physics)        solver_type = SOLVER_PHYSICS;
     else if (use_evolutionary) solver_type = SOLVER_EVOLUTIONARY;
-    else if (use_trad_opt)  solver_type = SOLVER_TRAD_OPT;
+    else if (use_trad_opt)  solver_type = use_mp ? SOLVER_TRAD_OPT_MT : SOLVER_TRAD_OPT;
     else if (!force_single_thread) {
         if (use_creative)       solver_type = SOLVER_CREATIVE;
         else if (use_mt_dyn)    solver_type = SOLVER_DYN;

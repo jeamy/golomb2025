@@ -20,7 +20,8 @@ TESTS := \
 	benchmark_solvers \
 	benchmark_extended \
 	benchmark_n10_11 \
-	test_new_solvers
+	test_new_solvers \
+	test_endpoint_parallel
 
 all: $(TESTS:%=$(BINDIR)/%)
 

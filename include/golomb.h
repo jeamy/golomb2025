@@ -48,6 +48,13 @@ bool solve_golomb(int n, int target_length, ruler_t *out, bool verbose);
 /* Traditional optimized: endpoint-aware branch & bound (right endpoint L fixed,
  * distance to L checked immediately for earlier pruning). Honest classical DFS. */
 bool solve_golomb_traditional_opt(int n, int target_length, ruler_t *out, bool verbose);
+/* Endpoint-aware DFS split across valid (second, third) prefixes.  This path
+ * deliberately does not use LUT positions; target_length is its only input
+ * from a possible LUT caller. */
+bool solve_golomb_traditional_opt_mt(int n, int target_length, ruler_t *out, bool verbose);
+/* Continue an endpoint-aware search from an already valid partial ruler. */
+bool dfs_endpoint_from_state(int depth, int n, int target_length,
+                             int *pos, uint64_t *dist_bs, bool verbose);
 
 /* Multi-threaded variant (OpenMP). Explores top-level branches in parallel. */
 bool solve_golomb_mt(int n, int target_length, ruler_t *out, bool verbose);

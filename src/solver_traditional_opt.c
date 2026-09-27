@@ -31,6 +31,11 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 /* Bitset manipulation helpers for the distance tracking bitset. */
 static inline void set_bit(uint64_t *bs, int idx) { bs[idx >> 6] |= 1ULL << (idx & 63); }
@@ -54,8 +59,8 @@ static inline int  test_bit(const uint64_t *bs, int idx) { return (bs[idx >> 6] 
  *   4. Check for intra-step collision (a left distance equals d_end).
  *   5. If all checks pass, commit distances and recurse.
  * --------------------------------------------------------------------------- */
-static bool dfs_endpoint(int depth, int n, int L,
-                         int *pos, uint64_t *dist_bs, bool verbose)
+bool dfs_endpoint_from_state(int depth, int n, int L,
+                             int *pos, uint64_t *dist_bs, bool verbose)
 {
     /* All inner marks placed -> the ruler is complete and valid. */
     if (depth == n - 1) {
@@ -120,7 +125,7 @@ static bool dfs_endpoint(int depth, int n, int L,
         if (verbose && depth < 6)
             printf("[TRAD-OPT] depth %d add %d (d_end=%d)\n", depth, next, d_end);
 
-        if (dfs_endpoint(depth + 1, n, L, pos, dist_bs, verbose))
+        if (dfs_endpoint_from_state(depth + 1, n, L, pos, dist_bs, verbose))
             return true;
 
         /* Rollback: undo all distances added in this step. */
@@ -158,11 +163,107 @@ bool solve_golomb_traditional_opt(int n, int target_length, ruler_t *out, bool v
     set_bit(dist_bs, target_length);
 
     /* Search for n-2 inner marks between 1 and L-1. */
-    if (!dfs_endpoint(1, n, target_length, pos, dist_bs, verbose))
+    if (!dfs_endpoint_from_state(1, n, target_length, pos, dist_bs, verbose))
         return false;
 
     out->marks = n;
     out->length = pos[n - 1];
     memcpy(out->pos, pos, n * sizeof(int));
     return true;
+}
+
+/* The CPU reference for a CUDA frontier: L is fixed before any interior mark
+ * is placed, then independent valid (s,t) prefixes are searched in parallel.
+ * No LUT lookup occurs here; callers provide only a candidate length. */
+bool solve_golomb_traditional_opt_mt(int n, int target_length,
+                                     ruler_t *out, bool verbose)
+{
+    if (n > MAX_MARKS || target_length > MAX_LEN_BITSET)
+        return false;
+    if (n <= 3)
+        return solve_golomb_traditional_opt(n, target_length, out, verbose);
+
+#ifndef _OPENMP
+    return solve_golomb_traditional_opt(n, target_length, out, verbose);
+#else
+    typedef struct { int s, t; } endpoint_cand_t;
+
+    const int T = target_length - (n - 3);
+    int second_max = target_length / 2;
+    if (second_max > T - 1) second_max = T - 1;
+    if (second_max < 1)
+        return false;
+
+    long long total = 0;
+    for (int s = 1; s <= second_max; ++s) {
+        const int cnt = T - s;
+        if (cnt > 0) total += cnt;
+    }
+    if (total <= 0)
+        return false;
+
+    endpoint_cand_t *cands = malloc((size_t)total * sizeof(*cands));
+    if (!cands)
+        return false;
+
+    long long k = 0;
+    for (int s = 1; s <= second_max; ++s)
+        for (int t = s + 1; t <= T; ++t)
+            cands[k++] = (endpoint_cand_t){s, t};
+
+    volatile int found = 0;
+    ruler_t winner = {0};
+
+#pragma omp parallel for schedule(dynamic, 16)
+    for (long long i = 0; i < total; ++i) {
+        int already_found;
+#pragma omp atomic read
+        already_found = found;
+        if (already_found)
+            continue;
+
+        const int s = cands[i].s;
+        const int t = cands[i].t;
+        /* The three initial distances must already be different. */
+        if (t - s == s)
+            continue;
+
+        uint64_t dist_bs[BS_WORDS] = {0};
+        int pos[MAX_MARKS] = {0};
+        pos[0] = 0;
+        pos[1] = s;
+        pos[2] = t;
+        pos[n - 1] = target_length;
+
+        const int initial[] = {target_length, s, t, t - s,
+                               target_length - s, target_length - t};
+        bool valid = true;
+        for (size_t d = 0; d < sizeof(initial) / sizeof(initial[0]); ++d) {
+            if (test_bit(dist_bs, initial[d])) {
+                valid = false;
+                break;
+            }
+            set_bit(dist_bs, initial[d]);
+        }
+        if (!valid)
+            continue;
+
+        if (dfs_endpoint_from_state(3, n, target_length, pos, dist_bs, verbose)) {
+            int old_found;
+#pragma omp atomic capture
+            { old_found = found; found = 1; }
+            if (old_found == 0) {
+                winner.marks = n;
+                winner.length = target_length;
+                memcpy(winner.pos, pos, n * sizeof(int));
+            }
+        }
+    }
+
+    free(cands);
+    if (!found)
+        return false;
+    *out = winner;
+    return true;
+#endif
 }
