@@ -90,14 +90,16 @@ n=14; Go/Rust/Java have not been run there.
 | 15 | 151 | 192.964 | 5.504 | 0.165 |
 | 16 | 177 | 2396.427 | 0.938 | 0.318 |
 | 17 | 199 | – (not run on CPU) | 533.471 | 0.356 |
-| 18 | 216 | – (not run on CPU) | 1272.666 | – (not run) |
+| 18 | 216 | – (not run on CPU) | 1272.666 | 2.488 |
 
 CUDA's "no hints" search still does the full endpoint-aware exact DFS
 (same algorithm as C's `-to` / the Go/Rust/Java ports) but with the search
 tree partitioned across the GPU; "guided" additionally seeds the search
-from the LUT's own `(pos[1], pos[2])` pair, which is why it stays under a
-second even at n=17-18 while "no hints" varies by three orders of
-magnitude depending on how quickly it stumbles onto that same pair. See
+from the LUT's own `(pos[1], pos[2])` pair, which is why it stays under
+2.5s even at n=17-18 (n=17: 0.356s; n=18 has more subprefixes under that
+pair to divide between CPU and GPU, hence the jump to 2.488s) while "no
+hints" varies by three orders of magnitude depending on how quickly it
+stumbles onto that same pair. See
 `nvidia/README.md` for the full algorithm description.
 
 n=17/18 were never attempted on the plain CPU solver — at the n=15→16
