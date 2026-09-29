@@ -104,3 +104,35 @@ n=17/18 were never attempted on the plain CPU solver — at the n=15→16
 scaling factor already visible above (~12x), n=17/18 would be projected
 at many hours to plausibly days of CPU time, which is exactly the gap
 the CUDA port exists to close.
+
+## Does the ASM/SIMD path need the endpoint-aware algorithm too? (2026-09-29)
+
+Yes, and it now has it: `-af`/`-an`/`-e` (the SIMD 8-distances-at-once
+duplicate check) previously only applied to the old left-to-right
+solver (`-mp`), never to the endpoint-aware `-to` solver that Go, Rust,
+Java and CUDA are all ported from. Added it to `-to` too (see
+`src/solver_traditional_opt.c`).
+
+| n | `-to -mp -b` | `-to -mp -b -af` | `-mp -b -af` (old algo, for reference) |
+|---|---:|---:|---:|
+| 13 | 1.053 | **0.991** | 2.415 |
+| 14 | 26.643 | 24.133 | **20.676** |
+
+Two things came out of measuring this rather than assuming it:
+
+1. **The SIMD gain on top of `-to` is modest** (~10-15%, matching
+   solver.c's own SIMD gain), not the large multiplier a naive reading
+   of "old algo + SIMD already beats the new algo without it" would
+   suggest. At n=13, `-to -mp -b -af` is now *faster* than the old
+   `-mp -b -af` — endpoint pruning plus a plain (non-LUT-guided)
+   candidate order already wins there. At n=14 the old algorithm is
+   still faster.
+2. **The real reason `-mp -b -af` was fast is mostly its LUT-guided
+   candidate ordering** (`solver.c` sorts `(second, third)` pairs by
+   proximity to the LUT's own reference pair before searching), not
+   primarily the SIMD check. `-to -mp` has no such ordering — it
+   enumerates candidates in plain ascending order — so at n=14 it can
+   still lose a search-order race to `-mp`'s head start, the same
+   run-to-run variance documented for Go/Rust/Java above. Adding
+   LUT-guided ordering to `-to -mp` as well is the next natural step if
+   the gap at higher `n` matters, and hasn't been done.

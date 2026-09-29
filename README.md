@@ -56,7 +56,7 @@ The default flags are `-Wall -O3 -march=native -flto -fopenmp`.  No additional l
 | `-d` | Use dynamic task-based solver. |
 | `-mpa`| NASM-assembler solver with LUT fast-lane and OpenMP harness (no checkpointing). |
 | `-mp`| Use multi-processing solver (static split, lowest priority). |
-| `-to`| Traditional optimized solver (endpoint-aware DFS). Implies `-b`; combine with `-mp` for parallel prefix search. |
+| `-to`| Traditional optimized solver (endpoint-aware DFS). Implies `-b`; combine with `-mp` for parallel prefix search, and (since 2026-09-29) with `-af`/`-an`/`-e` for the SIMD 8-distance batch check (modest additional speedup, see `src/solver_traditional_opt.c`). |
 
 **Solver Types (heuristic, non-exact)**
 | Flag | Description |

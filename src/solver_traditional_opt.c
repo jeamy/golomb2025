@@ -25,6 +25,18 @@
  * Complexity:
  *   Worst-case exponential (exhaustive search over all mark placements),
  *   but the constant factor is significantly reduced by early pruning.
+ *
+ * SIMD/ASM (2026-09-29):
+ *   -af/-an/-e now apply here too, not just to -mp's solver.c: the
+ *   "check all distances to previously placed left marks" loop batches
+ *   8 distances at once via the same test_any_dup8 dispatch solver.c
+ *   uses (FASM/NASM/AVX2-gather), once depth >= 8. Measured gain is
+ *   modest and consistent with solver.c's own SIMD gain (~10-15%, e.g.
+ *   n=14 -to -mp -b: 26.6s -> -to -mp -b -af: 24.1s) -- it does NOT
+ *   close the larger gap to -mp -b -af (20.7s), which comes mainly from
+ *   -mp's LUT-guided candidate ordering (closest to the known (second,
+ *   third) pair first) that this endpoint-aware -mp path does not have;
+ *   see BENCHMARKS.md.
  * ========================================================================== */
 
 #include "golomb.h"
@@ -41,6 +53,35 @@
 static inline void set_bit(uint64_t *bs, int idx) { bs[idx >> 6] |= 1ULL << (idx & 63); }
 static inline void clr_bit(uint64_t *bs, int idx) { bs[idx >> 6] &= ~(1ULL << (idx & 63)); }
 static inline int  test_bit(const uint64_t *bs, int idx) { return (bs[idx >> 6] >> (idx & 63)) & 1ULL; }
+
+/* ==================== Optional SIMD/ASM 8-at-a-time duplicate check ====================
+ * Shared with solver.c's -mp path (same weak-symbol convention: an absent
+ * ASM object leaves the pointer NULL and the C gather fallback is used).
+ * -af/-an/-e are parsed in main.c independently of which solver is chosen,
+ * so they apply here exactly as they do for -mp -- no new CLI flags needed. */
+extern int test_any_dup8_avx2_asm(const uint64_t *bs, const int *dist8)
+        __attribute__((weak));  /* -af: FASM unrolled scalar */
+extern int test_any_dup8_avx2_nasm(const uint64_t *bs, const int *dist8)
+        __attribute__((weak));  /* -an: NASM AVX2 gather */
+extern int test_any_dup8_avx2_gather(const uint64_t *bs, const int *dist8)
+        __attribute__((weak));  /* C AVX2 gather (default when SIMD is on) */
+extern bool g_use_asm_fasm;  /* -af flag, set in main.c */
+extern bool g_use_asm_nasm;  /* -an flag, set in main.c */
+
+/* Priority matches solver.c's test_any_dup8: ASM FASM > ASM NASM > C AVX2
+ * gather > scalar. Returns 1 if ANY of the 8 distances already exists. */
+static inline int test_any_dup8_to(const uint64_t *bs, const int *dist8)
+{
+    if (g_use_asm_fasm && test_any_dup8_avx2_asm)
+        return test_any_dup8_avx2_asm(bs, dist8);
+    if (g_use_asm_nasm && test_any_dup8_avx2_nasm)
+        return test_any_dup8_avx2_nasm(bs, dist8);
+    if (g_use_simd && test_any_dup8_avx2_gather)
+        return test_any_dup8_avx2_gather(bs, dist8);
+    for (int i = 0; i < 8; ++i)
+        if (test_bit(bs, dist8[i])) return 1;
+    return 0;
+}
 
 /* ---------------------------------------------------------------------------
  * dfs_endpoint -- Recursive DFS that places inner marks (indices 1..n-2).
@@ -96,12 +137,25 @@ bool dfs_endpoint_from_state(int depth, int n, int L,
         if (test_bit(dist_bs, d_end))
             continue;
 
-        /* Check all distances from `next` to previously placed left marks. */
+        /* Check all distances from `next` to previously placed left marks.
+         * SIMD/ASM path checks 8 at once when available and depth is large
+         * enough to amortize the batch setup (mirrors solver.c's -mp path). */
+        for (int i = 0; i < depth; ++i)
+            new_dists[i] = next - pos[i];
+
         bool ok = true;
-        for (int i = 0; i < depth; ++i) {
-            int d = next - pos[i];
-            if (test_bit(dist_bs, d)) { ok = false; break; }
-            new_dists[i] = d;
+        {
+            int i = 0;
+            if (g_use_simd && depth >= 8) {
+                for (; i + 8 <= depth; i += 8) {
+                    if (test_any_dup8_to(dist_bs, &new_dists[i])) { ok = false; break; }
+                }
+            }
+            if (ok) {
+                for (; i < depth; ++i) {
+                    if (test_bit(dist_bs, new_dists[i])) { ok = false; break; }
+                }
+            }
         }
         if (!ok)
             continue;

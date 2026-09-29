@@ -492,6 +492,16 @@ extern int test_any_dup8_avx2_nasm(const uint64_t *, const int *) __attribute__(
         strcat(opts, "-g ");
         strcat(fsuffix, "_g");
     }
+    else if (use_trad_opt)
+    {
+        strcat(opts, "-to ");
+        strcat(fsuffix, "_to");
+        if (use_mp)
+        {
+            strcat(opts, "-mp ");
+            strcat(fsuffix, "_mp");
+        }
+    }
     else if (use_creative)
     {
         strcat(opts, "-c ");
