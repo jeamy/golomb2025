@@ -673,8 +673,15 @@ static int bits_words(int L) { return (L + 1 + 31) / 32; }
 
 static bool bits_supported(int n, int L)
 {
-    /* the kernel register stack holds up to 16 levels below a depth-4 prefix */
-    return L + 1 <= 256 && n - 1 - 4 <= GB_MAX_LEVELS && n - 2 - 4 <= 16;
+    /* the kernel register stack holds up to 16 levels below a depth-4 prefix.
+     * Word count K (bits_words(L)) must stay within what
+     * launch_bits_dfs_lv's switch instantiates below (K <= 19, i.e.
+     * L <= 600, matching MAX_LEN_BITSET on the CPU side). Before
+     * 2026-10-02 this capped at L+1 <= 256 (K <= 8): n=20 (L=283) and
+     * every larger LUT entry silently fell back to the much slower
+     * per-thread launch_frontier_dfs kernel, a cliff-edge regression this
+     * fixes (see BENCHMARKS.md). */
+    return L <= 600 && n - 1 - 4 <= GB_MAX_LEVELS && n - 2 - 4 <= 16;
 }
 
 static int g_bits_grid = 0; /* persistent grid size (blocks), set at startup */
@@ -685,6 +692,10 @@ static void launch_bits_dfs_lv(int n, int L, int blocks, const FrontierPrefix *d
                                volatile int *flag, int *d_result, int *d_winner,
                                unsigned long long *d_count, cudaStream_t stream)
 {
+    /* K=2..19 covers L+1 <= 32*19 = 608, i.e. every L <= 600 that
+     * bits_supported() now allows (was capped at K<=8, L<=255, before
+     * 2026-10-02). golomb_bits.h's gb_dfs_reg<K,LV> is already fully
+     * generic in K; this switch is the only place that needed widening. */
     switch (bits_words(L)) {
         case 1: case 2: dfs_bits_kernel<2, LV><<<blocks, 256, 0, stream>>>(n, L, d_list, cnt, d_next, mirror, d_stop, flag, d_result, d_winner, d_count); break;
         case 3: dfs_bits_kernel<3, LV><<<blocks, 256, 0, stream>>>(n, L, d_list, cnt, d_next, mirror, d_stop, flag, d_result, d_winner, d_count); break;
@@ -692,7 +703,18 @@ static void launch_bits_dfs_lv(int n, int L, int blocks, const FrontierPrefix *d
         case 5: dfs_bits_kernel<5, LV><<<blocks, 256, 0, stream>>>(n, L, d_list, cnt, d_next, mirror, d_stop, flag, d_result, d_winner, d_count); break;
         case 6: dfs_bits_kernel<6, LV><<<blocks, 256, 0, stream>>>(n, L, d_list, cnt, d_next, mirror, d_stop, flag, d_result, d_winner, d_count); break;
         case 7: dfs_bits_kernel<7, LV><<<blocks, 256, 0, stream>>>(n, L, d_list, cnt, d_next, mirror, d_stop, flag, d_result, d_winner, d_count); break;
-        default: dfs_bits_kernel<8, LV><<<blocks, 256, 0, stream>>>(n, L, d_list, cnt, d_next, mirror, d_stop, flag, d_result, d_winner, d_count); break;
+        case 8: dfs_bits_kernel<8, LV><<<blocks, 256, 0, stream>>>(n, L, d_list, cnt, d_next, mirror, d_stop, flag, d_result, d_winner, d_count); break;
+        case 9: dfs_bits_kernel<9, LV><<<blocks, 256, 0, stream>>>(n, L, d_list, cnt, d_next, mirror, d_stop, flag, d_result, d_winner, d_count); break;
+        case 10: dfs_bits_kernel<10, LV><<<blocks, 256, 0, stream>>>(n, L, d_list, cnt, d_next, mirror, d_stop, flag, d_result, d_winner, d_count); break;
+        case 11: dfs_bits_kernel<11, LV><<<blocks, 256, 0, stream>>>(n, L, d_list, cnt, d_next, mirror, d_stop, flag, d_result, d_winner, d_count); break;
+        case 12: dfs_bits_kernel<12, LV><<<blocks, 256, 0, stream>>>(n, L, d_list, cnt, d_next, mirror, d_stop, flag, d_result, d_winner, d_count); break;
+        case 13: dfs_bits_kernel<13, LV><<<blocks, 256, 0, stream>>>(n, L, d_list, cnt, d_next, mirror, d_stop, flag, d_result, d_winner, d_count); break;
+        case 14: dfs_bits_kernel<14, LV><<<blocks, 256, 0, stream>>>(n, L, d_list, cnt, d_next, mirror, d_stop, flag, d_result, d_winner, d_count); break;
+        case 15: dfs_bits_kernel<15, LV><<<blocks, 256, 0, stream>>>(n, L, d_list, cnt, d_next, mirror, d_stop, flag, d_result, d_winner, d_count); break;
+        case 16: dfs_bits_kernel<16, LV><<<blocks, 256, 0, stream>>>(n, L, d_list, cnt, d_next, mirror, d_stop, flag, d_result, d_winner, d_count); break;
+        case 17: dfs_bits_kernel<17, LV><<<blocks, 256, 0, stream>>>(n, L, d_list, cnt, d_next, mirror, d_stop, flag, d_result, d_winner, d_count); break;
+        case 18: dfs_bits_kernel<18, LV><<<blocks, 256, 0, stream>>>(n, L, d_list, cnt, d_next, mirror, d_stop, flag, d_result, d_winner, d_count); break;
+        default: dfs_bits_kernel<19, LV><<<blocks, 256, 0, stream>>>(n, L, d_list, cnt, d_next, mirror, d_stop, flag, d_result, d_winner, d_count); break;
     }
 }
 
@@ -727,7 +749,10 @@ static void init_bits_grid(void)
     fprintf(stderr, "[CUDA] Persistent DFS grid: %d SMs x %d blocks x 256 threads.\n", sms, per_sm);
 }
 
-/* Host counterpart: the same bit-parallel DFS for the CPU threads. */
+/* Host counterpart: the same bit-parallel DFS for the CPU threads.
+ * Must cover the same K range as launch_bits_dfs_lv's switch above --
+ * both are gated by the same bits_supported(), so a prefix routed here
+ * always needs K <= 19 too. */
 static int cpu_bits_dfs(int n, int L, int depth, int *pos, bool mirror, volatile int *flag,
                         long long *count = nullptr)
 {
@@ -738,7 +763,18 @@ static int cpu_bits_dfs(int n, int L, int depth, int *pos, bool mirror, volatile
         case 5: return gb_dfs<5>(n, L, depth, pos, h_ogr, mirror, flag, count);
         case 6: return gb_dfs<6>(n, L, depth, pos, h_ogr, mirror, flag, count);
         case 7: return gb_dfs<7>(n, L, depth, pos, h_ogr, mirror, flag, count);
-        default: return gb_dfs<8>(n, L, depth, pos, h_ogr, mirror, flag, count);
+        case 8: return gb_dfs<8>(n, L, depth, pos, h_ogr, mirror, flag, count);
+        case 9: return gb_dfs<9>(n, L, depth, pos, h_ogr, mirror, flag, count);
+        case 10: return gb_dfs<10>(n, L, depth, pos, h_ogr, mirror, flag, count);
+        case 11: return gb_dfs<11>(n, L, depth, pos, h_ogr, mirror, flag, count);
+        case 12: return gb_dfs<12>(n, L, depth, pos, h_ogr, mirror, flag, count);
+        case 13: return gb_dfs<13>(n, L, depth, pos, h_ogr, mirror, flag, count);
+        case 14: return gb_dfs<14>(n, L, depth, pos, h_ogr, mirror, flag, count);
+        case 15: return gb_dfs<15>(n, L, depth, pos, h_ogr, mirror, flag, count);
+        case 16: return gb_dfs<16>(n, L, depth, pos, h_ogr, mirror, flag, count);
+        case 17: return gb_dfs<17>(n, L, depth, pos, h_ogr, mirror, flag, count);
+        case 18: return gb_dfs<18>(n, L, depth, pos, h_ogr, mirror, flag, count);
+        default: return gb_dfs<19>(n, L, depth, pos, h_ogr, mirror, flag, count);
     }
 }
 

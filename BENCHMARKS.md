@@ -92,6 +92,7 @@ n=14; Go/Rust/Java have not been run there.
 | 17 | 199 | – (not run on CPU) | 533.471 | 0.356 |
 | 18 | 216 | – (not run on CPU) | 1272.666 | 2.488 |
 | 19 | 246 | – (not run on CPU) | 1486.751 (24:47) | 91.630 |
+| 20 | 283 | – (not run on CPU) | see note below | 5.869 |
 
 CUDA's "no hints" search still does the full endpoint-aware exact DFS
 (same algorithm as C's `-to` / the Go/Rust/Java ports) but with the search
@@ -140,3 +141,38 @@ Two things came out of measuring this rather than assuming it:
    run-to-run variance documented for Go/Rust/Java above. Adding
    LUT-guided ordering to `-to -mp` as well is the next natural step if
    the gap at higher `n` matters, and hasn't been done.
+
+## CUDA: the n=20 cliff was a real bug, not just "harder" (2026-10-02)
+
+n=19 guided took 91.6s; n=20 guided ran for over 2h45min before being
+aborted, with the GPU pinned at 100% utilization the whole time (not
+hung — genuinely computing). That jump is too sharp to be the DFS
+simply getting harder by one `n`.
+
+`GOLOMB_DEBUG=1` traced it: the very first GPU chunk launched with
+`chunk=8192`, the sentinel value `gpu_dfs_worker` uses for `L > 255`
+when the bit-parallel kernel's word count doesn't fit. n=19's optimal
+length is 246; n=20's is 283. `bits_supported()` gated the fast
+bit-parallel kernel at `L + 1 <= 256` (`L <= 255`) because the K-word
+dispatch switch in `launch_bits_dfs_lv` (and `cpu_bits_dfs` on the host
+side) only had cases up to `K=8` — exactly `L <= 255`. n=20 silently
+fell back to `launch_frontier_dfs`'s legacy per-thread kernel, the same
+kernel the project had before the bit-parallel persistent-kernel work
+(commit `d5688d0` and earlier) — with one GPU thread per prefix and no
+load balancing within a chunk, a single slow subtree can stall an
+entire 8192-prefix chunk indefinitely.
+
+`golomb_bits.h`'s DFS templates (`gb_dfs<K>`, `gb_dfs_reg<K,LV>`) were
+already fully generic in `K` — nothing there needed to change. Extended
+both dispatch switches (GPU and CPU) from `K<=8` to `K<=19` (covers
+`L <= 600`, matching `MAX_LEN_BITSET`) and raised `bits_supported()`'s
+cap to match.
+
+| | n=19 guided (unaffected, L=246<255) | n=20 guided (L=283, was never run to completion) |
+|---|---:|---:|
+| Before | 91.6s | aborted after 2h45min |
+| After | 94.6s (same, confirms no regression) | **5.869s** |
+
+Correctness re-verified for n=14 (L=127, K=4, untouched code path) and
+n=16 (L=177, K=6) to confirm the extended dispatch didn't break the
+existing `K<=8` cases.

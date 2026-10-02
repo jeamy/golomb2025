@@ -187,8 +187,16 @@ re-validated on the host before it is printed.
   constructed and validated by exact DFS.
 - __Fallbacks__: with a checkpoint (`-f`), without a GPU, or when frontier
   generation fails, the older root-candidate path is used (`-ap`, `-wu`,
-  `-dh`, `-dw` affect only that path).  L > 255 uses the older per-thread
-  kernels.  Allocation, launch and transfer failures are completed on the CPU.
+  `-dh`, `-dw` affect only that path).  Allocation, launch and transfer
+  failures are completed on the CPU.
+  - Until 2026-10-02, `L > 255` silently fell back to the older, much
+    slower per-thread kernels (the bit-parallel kernel's word-count
+    dispatch only went up to `K=8`, i.e. `L <= 255`): n=20 (`L=283`)
+    took hours instead of the ~6s it takes now that the dispatch covers
+    `K` up to 19 (`L <= 600`, matching `MAX_LEN_BITSET`). See
+    `BENCHMARKS.md` for the before/after numbers and how this was found
+    (`GOLOMB_DEBUG=1` showed the legacy kernel's `chunk=8192` sentinel
+    instead of the expected large bit-parallel chunk size).
 
 ### Benchmarks (2026-09-27, GTX 1660 Ti + Ryzen 7 3700X, CUDA 13.0 toolkit + runtime, GCC 15)
 
