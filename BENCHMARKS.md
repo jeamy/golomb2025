@@ -91,21 +91,23 @@ n=14; Go/Rust/Java have not been run there.
 | 16 | 177 | 2396.427 | 0.938 | 0.318 |
 | 17 | 199 | – (not run on CPU) | 533.471 | 0.356 |
 | 18 | 216 | – (not run on CPU) | 1272.666 | 2.488 |
+| 19 | 246 | – (not run on CPU) | 1486.751 (24:47) | 91.630 |
 
 CUDA's "no hints" search still does the full endpoint-aware exact DFS
 (same algorithm as C's `-to` / the Go/Rust/Java ports) but with the search
 tree partitioned across the GPU; "guided" additionally seeds the search
-from the LUT's own `(pos[1], pos[2])` pair, which is why it stays under
-2.5s even at n=17-18 (n=17: 0.356s; n=18 has more subprefixes under that
-pair to divide between CPU and GPU, hence the jump to 2.488s) while "no
-hints" varies by three orders of magnitude depending on how quickly it
-stumbles onto that same pair. See
-`nvidia/README.md` for the full algorithm description.
+from the LUT's own `(pos[1], pos[2])` pair. The subprefix count under
+that pair grows with `n` (n=17: 0.356s; n=18: 2.488s; n=19: 91.630s,
+363879 subprefixes under pair `(1,6)`), but "guided" still stays orders
+of magnitude below "no hints" (24:47 at n=19), which itself varies by
+three orders of magnitude depending on how quickly it stumbles onto
+that same pair. See `nvidia/README.md` for the full algorithm
+description.
 
-n=17/18 were never attempted on the plain CPU solver — at the n=15→16
-scaling factor already visible above (~12x), n=17/18 would be projected
-at many hours to plausibly days of CPU time, which is exactly the gap
-the CUDA port exists to close.
+n=17/18/19 were never attempted on the plain CPU solver — at the
+n=15→16 scaling factor already visible above (~12x), they would be
+projected at many hours to plausibly days of CPU time, which is
+exactly the gap the CUDA port exists to close.
 
 ## Does the ASM/SIMD path need the endpoint-aware algorithm too? (2026-09-29)
 
